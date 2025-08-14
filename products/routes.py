@@ -211,6 +211,104 @@ async def get_best_selling_products(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get best selling products")
 
 # =============================================================================
+# PRODUCT OFFERS ENDPOINTS
+# =============================================================================
+
+@router.get("/offers", response_model=List[dict])
+async def get_products_with_offers(
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of products to return"),
+    category_id: Optional[str] = Query(None, description="Filter by category ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all products that have active offers
+    
+    Returns products that currently have active offers:
+    - Product information
+    - Number of offers available
+    - Best offer details
+    - Useful for showcasing discounted products
+    """
+    try:
+        # Import offer service
+        from offers.services import OfferService
+        
+        offer_service = OfferService(db)
+        products_with_offers = offer_service.get_products_with_offers()
+        
+        # Apply category filter if specified
+        if category_id:
+            products_with_offers = [
+                product for product in products_with_offers
+                if any(cat_id == category_id for cat_id in product.get('category_ids', []))
+            ]
+        
+        # Apply limit
+        if limit:
+            products_with_offers = products_with_offers[:limit]
+        
+        return products_with_offers
+        
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get products with offers")
+
+@router.get("/{product_id}/offers", response_model=List[dict])
+async def get_product_offers(
+    product_id: str = Path(..., description="ID of the product to get offers for"),
+    user_id: Optional[str] = Query(None, description="User ID for usage limit checking"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all offers applicable to a specific product
+    
+    Returns offers that can be applied to the specified product:
+    - Product-specific offers
+    - Category-based offers
+    - Excludes offers that exclude this product
+    - Includes user-specific usage information
+    """
+    try:
+        # Import offer service
+        from offers.services import OfferService
+        
+        offer_service = OfferService(db)
+        product_offers = offer_service.get_product_offers(
+            product_id=product_id,
+            user_id=user_id
+        )
+        
+        # Convert to simple dict format for consistency
+        offers_list = []
+        for offer in product_offers:
+            offers_list.append({
+                "offer_id": offer.offer_id,
+                "offer_name": offer.offer_name,
+                "description": offer.description,
+                "offer_type": offer.offer_type,
+                "discount_type": offer.discount_type,
+                "discount_value": offer.discount_value,
+                "original_price": offer.original_price,
+                "discounted_price": offer.discounted_price,
+                "savings_amount": offer.savings_amount,
+                "savings_percentage": offer.savings_percentage,
+                "min_purchase_amount": offer.min_purchase_amount,
+                "max_discount_amount": offer.max_discount_amount,
+                "usage_limit_per_user": offer.usage_limit_per_user,
+                "remaining_usage": offer.remaining_usage,
+                "start_date": offer.start_date,
+                "end_date": offer.end_date,
+                "is_active": offer.is_active,
+                "priority": offer.priority
+            })
+        
+        return offers_list
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get product offers")
+
+# =============================================================================
 # PRODUCT SEARCH ENDPOINTS
 # =============================================================================
 
@@ -560,6 +658,8 @@ async def product_service_health_check():
                 "GET /api/products/featured",
                 "GET /api/products/new-arrivals",
                 "GET /api/products/best-selling",
+                "GET /api/products/offers",
+                "GET /api/products/{product_id}/offers",
                 "GET /api/products/search",
                 "GET /api/products/filter",
                 "GET /api/products/paginated",
@@ -571,6 +671,7 @@ async def product_service_health_check():
             "features": [
                 "Product listing with filtering and sorting",
                 "Featured, new arrivals, and best selling products",
+                "Product offers and discounts",
                 "Advanced search functionality",
                 "Comprehensive filtering options",
                 "Pagination support",

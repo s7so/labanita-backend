@@ -19,6 +19,7 @@ from auth.routes import router as auth_router
 from user.routes import router as user_router
 from categories.routes import router as category_router
 from products.routes import router as product_router
+from offers.routes import router as offer_router
 
 # =============================================================================
 # LIFESPAN EVENTS
@@ -106,6 +107,9 @@ app.include_router(category_router, prefix="/api")
 # Product management routes
 app.include_router(product_router, prefix="/api")
 
+# Offer management routes
+app.include_router(offer_router, prefix="/api")
+
 # =============================================================================
 # ROOT ENDPOINT
 # =============================================================================
@@ -128,6 +132,7 @@ async def root():
                 "User Management (/api/user/*)",
                 "Category Management (/api/categories/*)",
                 "Product Management (/api/products/*)",
+                "Offer Management (/api/offers/*)",
                 "Order Management (/api/orders/*)",
                 "Payment Processing (/api/payments/*)",
                 "Inventory Management (/api/inventory/*)",
@@ -188,7 +193,8 @@ async def detailed_health_check(db: Session = Depends(get_db)):
                     "auth": "running",
                     "user_management": "running",
                     "category_management": "running",
-                    "product_management": "running"
+                    "product_management": "running",
+                    "offer_management": "running"
                 }
             },
             message="Detailed health check completed"
@@ -381,5 +387,6 @@ if __name__ == "__main__":
     print("🔍 Health check available at /health")
     print("🎯 Category management available at /api/categories")
     print("🛍️ Product management available at /api/products")
+    print("🎁 Offer management available at /api/offers")
     print("👤 User management available at /api/user")
     print("🔐 Authentication available at /api/auth")
