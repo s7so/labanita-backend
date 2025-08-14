@@ -18,6 +18,7 @@ from core.responses import success_response, error_response
 from auth.routes import router as auth_router
 from user.routes import router as user_router
 from categories.routes import router as category_router
+from products.routes import router as product_router
 
 # =============================================================================
 # LIFESPAN EVENTS
@@ -101,6 +102,9 @@ app.include_router(user_router, prefix="/api")
 
 # Category management routes
 app.include_router(category_router, prefix="/api")
+
+# Product management routes
+app.include_router(product_router, prefix="/api")
 
 # =============================================================================
 # ROOT ENDPOINT
@@ -256,7 +260,7 @@ async def get_products(
     Get all products (Legacy endpoint)
     
     This endpoint is maintained for backward compatibility.
-    Consider using the new category-based product endpoints for better organization.
+    Consider using the new product management endpoints for better functionality.
     """
     try:
         from models import Product
@@ -285,7 +289,7 @@ async def get_product(
     Get a specific product by ID (Legacy endpoint)
     
     This endpoint is maintained for backward compatibility.
-    Consider using the new category-based product endpoints for better organization.
+    Consider using the new product management endpoints for better functionality.
     """
     try:
         from models import Product
@@ -376,5 +380,6 @@ if __name__ == "__main__":
     print("📚 API Documentation available at /docs")
     print("🔍 Health check available at /health")
     print("🎯 Category management available at /api/categories")
+    print("🛍️ Product management available at /api/products")
     print("👤 User management available at /api/user")
     print("🔐 Authentication available at /api/auth")
