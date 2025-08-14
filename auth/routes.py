@@ -11,7 +11,7 @@ from core.exceptions import (
     PhoneNumberException,
     NotFoundException
 )
-from auth.models import User
+from models import User
 from auth.schemas import (
     PhoneNumberRequest, OTPVerificationRequest, UserRegistrationRequest,
     UserLoginRequest, PasswordResetRequest, UserProfileUpdateRequest,

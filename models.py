@@ -26,11 +26,12 @@ class User(Base):
         primary_key=True, 
         default=uuid.uuid4
     )
-    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
-    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True)
-    facebook_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True)
-    google_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    facebook_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
+    google_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
     points_balance: Mapped[int] = mapped_column(
         Integer, 
         default=0, 
@@ -38,6 +39,18 @@ class User(Base):
         server_default="0"
     )
     points_expiry_date: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default="false"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), 
         nullable=False, 
@@ -48,22 +61,23 @@ class User(Base):
         nullable=False, 
         server_default=func.current_timestamp()
     )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, 
-        default=True, 
-        nullable=False,
-        server_default="true"
-    )
     
     # Relationships
     addresses: Mapped[List["Address"]] = relationship("Address", back_populates="user", cascade="all, delete-orphan")
     payment_methods: Mapped[List["PaymentMethod"]] = relationship("PaymentMethod", back_populates="user", cascade="all, delete-orphan")
     orders: Mapped[List["Order"]] = relationship("Order", back_populates="user")
     cart_items: Mapped[List["CartItem"]] = relationship("CartItem", back_populates="user", cascade="all, delete-orphan")
-    
+    sessions: Mapped[List["UserSession"]] = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    otps: Mapped[List["OTP"]] = relationship("OTP", back_populates="user", cascade="all, delete-orphan")
+    password_resets: Mapped[List["PasswordReset"]] = relationship("PasswordReset", back_populates="user", cascade="all, delete-orphan")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("points_balance >= 0", name="check_points_balance_positive"),
+        Index("idx_user_phone_number", "phone_number"),
+        Index("idx_user_email", "email"),
+        Index("idx_user_facebook_id", "facebook_id"),
+        Index("idx_user_google_id", "google_id"),
     )
 
 
@@ -659,3 +673,72 @@ class ProductOffer(Base):
         Index("idx_product_offers_active", "is_active"),
         Index("idx_product_offers_dates", "start_date", "end_date"),
     )
+
+
+# --- Auth Models ---
+
+class UserSession(Base):
+    """User session model for managing active sessions"""
+    __tablename__ = "user_sessions"
+
+    session_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    refresh_token: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    device_info: Mapped[Optional[str]] = mapped_column(Text)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    user_agent: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp()
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp()
+    )
+
+    # Relationship
+    user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+class OTP(Base):
+    """One-Time Password model for phone verification"""
+    __tablename__ = "otps"
+
+    otp_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    phone_number: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    otp_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    otp_type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'REGISTRATION', 'LOGIN', 'RESET_PASSWORD'
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False, server_default="3")
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp()
+    )
+
+    # Relationship
+    user: Mapped["User"] = relationship("User", back_populates="otps")
+
+class PasswordReset(Base):
+    """Password reset token model"""
+    __tablename__ = "password_resets"
+
+    reset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    reset_token: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp()
+    )
+
+    # Relationship
+    user: Mapped["User"] = relationship("User", back_populates="password_resets")

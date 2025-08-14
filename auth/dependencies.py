@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from core.security import security
 from core.exceptions import AuthenticationException, AuthorizationException
-from auth.models import User
+from models import User
 from auth.services import AuthService
 
 # HTTP Bearer token scheme

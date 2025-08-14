@@ -11,7 +11,7 @@ from core.exceptions import (
     InvalidCredentialsException
 )
 from auth.dependencies import get_current_active_user, get_current_verified_user
-from auth.models import User
+from models import User
 from user.schemas import (
     UserProfileUpdateRequest, PasswordChangeRequest, AccountDeletionRequest,
     UserProfileResponse, UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse,

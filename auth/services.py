@@ -15,7 +15,7 @@ from core.exceptions import (
     NotFoundException
 )
 from core.responses import success_response, error_response
-from auth.models import User, UserSession, OTP, PasswordReset
+from models import User, UserSession, OTP, PasswordReset
 from auth.schemas import (
     UserCreate, UserUpdate, OTPCreate, SessionCreate,
     UserProfileResponse, TokenResponse, OTPResponse

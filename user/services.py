@@ -13,7 +13,7 @@ from core.exceptions import (
 )
 from core.responses import success_response, error_response
 from core.security import security
-from auth.models import User
+from models import User
 from models import Order, OrderItem, Product, Category, Address, PaymentMethod
 from user.schemas import (
     UserUpdate, PointsUpdate, UserProfileResponse, 
