@@ -8,66 +8,26 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from database import get_db, create_tables, check_database_connection, Base
+from core.config import settings
+from core.responses import success_response, error_response
+from core.exceptions import LabanitaException
 from schemas import ProductResponse, CategoryResponse
 from services import (
-    get_products,
-    get_product_by_id,
-    get_categories,
-    get_category_by_id,
-    get_featured_products,
-    get_new_arrivals,
-    get_best_selling_products,
-    search_products,
-    get_products_count,
-    get_categories_count
+    get_products, get_product_by_id, get_categories, get_category_by_id,
+    get_featured_products, get_new_arrivals, get_best_selling_products,
+    search_products, get_products_count, get_categories_count
 )
-
-
-# ========================================
-# FASTAPI APPLICATION SETUP
-# ========================================
-
-# Create FastAPI application instance
-app = FastAPI(
-    title="Labanita Egyptian Sweets Store API",
-    description="A modern, scalable backend API for the Labanita Egyptian sweets delivery application",
-    version="1.0.0",
-    contact={
-        "name": "Labanita Development Team",
-        "email": "dev@labanita.com"
-    },
-    license_info={
-        "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT"
-    },
-    lifespan=lifespan
-)
-
-# Add CORS middleware for frontend integration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# ========================================
-# LIFESPAN MANAGER
-# ========================================
+from auth.routes import router as auth_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan manager for startup and shutdown events.
-    """
-    # Startup
+    """Application lifespan manager"""
     try:
-        # Create database tables if they don't exist
+        # Create database tables
         create_tables()
         print("✅ Database tables created successfully")
         
@@ -82,55 +42,83 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
     print("🔄 Shutting down Labanita API...")
 
+# Create FastAPI app
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="A modern, scalable backend API for the Labanita Egyptian sweets delivery application",
+    version=settings.APP_VERSION,
+    contact={"name": "Labanita Development Team", "email": "dev@labanita.com"},
+    license_info={"name": "MIT License", "url": "https://opensource.org/licenses/MIT"},
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc"
+)
 
-# ========================================
-# HEALTH CHECK ENDPOINT
-# ========================================
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=settings.CORS_ALLOW_METHODS,
+    allow_headers=settings.CORS_ALLOW_HEADERS,
+)
 
-@app.get("/", tags=["Health"])
-async def root():
-    """
-    Root endpoint providing API information and health status.
-    """
-    return {
-        "message": "Welcome to Labanita Egyptian Sweets Store API",
-        "version": "1.0.0",
-        "status": "healthy",
-        "database": "connected" if check_database_connection() else "disconnected"
-    }
+# Include authentication routes
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 
+# Global exception handler for custom exceptions
+@app.exception_handler(LabanitaException)
+async def labanita_exception_handler(request, exc: LabanitaException):
+    """Handle custom Labanita exceptions"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response(
+            message=exc.detail,
+            error_code=exc.error_code,
+            errors=exc.details
+        ).dict()
+    )
+
+# =============================================================================
+# HEALTH CHECK ENDPOINTS
+# =============================================================================
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """
-    Health check endpoint for monitoring and load balancers.
-    """
-    db_status = check_database_connection()
-    
-    return {
-        "status": "healthy" if db_status else "unhealthy",
-        "database": "connected" if db_status else "disconnected",
-        "timestamp": "2024-01-01T00:00:00Z"  # You can use datetime.utcnow() here
-    }
+    """Basic health check endpoint"""
+    return success_response(
+        data={
+            "status": "healthy",
+            "service": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT
+        },
+        message="Labanita API is running"
+    )
 
+@app.get("/api/health", tags=["Health"])
+async def api_health_check():
+    """API health check endpoint"""
+    return success_response(
+        data={
+            "status": "healthy",
+            "service": "Labanita API",
+            "version": settings.APP_VERSION,
+            "database": "connected" if check_database_connection() else "disconnected"
+        },
+        message="API is healthy"
+    )
 
-# ========================================
+# =============================================================================
 # PRODUCT ENDPOINTS
-# ========================================
+# =============================================================================
 
-@app.get(
-    "/products/",
-    response_model=List[ProductResponse],
-    tags=["Products"],
-    summary="Get all products",
-    description="Retrieve a paginated list of products with optional filtering"
-)
+@app.get("/api/products/", response_model=List[ProductResponse], tags=["Products"])
 async def read_products(
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0, description="Number of products to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of products to return"),
     category_id: Optional[uuid.UUID] = Query(None, description="Filter by category ID"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
@@ -138,286 +126,196 @@ async def read_products(
     is_best_selling: Optional[bool] = Query(None, description="Filter by best selling status"),
     db: Session = Depends(get_db)
 ):
-    """
-    Get a paginated list of products with optional filtering.
-    
-    - **skip**: Number of records to skip (for pagination)
-    - **limit**: Maximum number of records to return (max 1000)
-    - **category_id**: Filter by specific category
-    - **is_active**: Filter by active status
-    - **is_featured**: Filter by featured products
-    - **is_new_arrival**: Filter by new arrivals
-    - **is_best_selling**: Filter by best selling products
-    """
-    products = get_products(
-        db=db,
-        skip=skip,
-        limit=limit,
-        category_id=category_id,
-        is_active=is_active,
-        is_featured=is_featured,
-        is_new_arrival=is_new_arrival,
-        is_best_selling=is_best_selling
-    )
-    
-    return products
-
-
-@app.get(
-    "/products/{product_id}",
-    response_model=ProductResponse,
-    tags=["Products"],
-    summary="Get product by ID",
-    description="Retrieve a specific product by its UUID"
-)
-async def read_product(
-    product_id: uuid.UUID,
-    db: Session = Depends(get_db)
-):
-    """
-    Get a specific product by its ID.
-    
-    - **product_id**: The UUID of the product to retrieve
-    """
-    product = get_product_by_id(db=db, product_id=product_id)
-    
-    if product is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Product with ID {product_id} not found"
+    """Get list of products with optional filtering"""
+    try:
+        products = get_products(
+            db=db,
+            skip=skip,
+            limit=limit,
+            category_id=category_id,
+            is_active=is_active,
+            is_featured=is_featured,
+            is_new_arrival=is_new_arrival,
+            is_best_selling=is_best_selling
         )
-    
-    return product
+        
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve products: {str(e)}")
 
+@app.get("/api/products/{product_id}", response_model=ProductResponse, tags=["Products"])
+async def read_product(product_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Get a specific product by ID"""
+    try:
+        product = get_product_by_id(db=db, product_id=product_id)
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        return ProductResponse.from_orm(product)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve product: {str(e)}")
 
-@app.get(
-    "/products/featured/",
-    response_model=List[ProductResponse],
-    tags=["Products"],
-    summary="Get featured products",
-    description="Retrieve a list of featured products"
-)
+@app.get("/api/products/featured", response_model=List[ProductResponse], tags=["Products"])
 async def read_featured_products(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of featured products to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """
-    Get a list of featured products.
-    
-    - **limit**: Maximum number of featured products to return
-    """
-    products = get_featured_products(db=db, limit=limit)
-    return products
+    """Get featured products"""
+    try:
+        products = get_featured_products(db=db, skip=skip, limit=limit)
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve featured products: {str(e)}")
 
-
-@app.get(
-    "/products/new-arrivals/",
-    response_model=List[ProductResponse],
-    tags=["Products"],
-    summary="Get new arrival products",
-    description="Retrieve a list of new arrival products"
-)
+@app.get("/api/products/new-arrivals", response_model=List[ProductResponse], tags=["Products"])
 async def read_new_arrivals(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of new arrival products to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """
-    Get a list of new arrival products.
-    
-    - **limit**: Maximum number of new arrival products to return
-    """
-    products = get_new_arrivals(db=db, limit=limit)
-    return products
+    """Get new arrival products"""
+    try:
+        products = get_new_arrivals(db=db, skip=skip, limit=limit)
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve new arrivals: {str(e)}")
 
-
-@app.get(
-    "/products/best-selling/",
-    response_model=List[ProductResponse],
-    tags=["Products"],
-    summary="Get best selling products",
-    description="Retrieve a list of best selling products"
-)
+@app.get("/api/products/best-selling", response_model=List[ProductResponse], tags=["Products"])
 async def read_best_selling_products(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of best selling products to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """
-    Get a list of best selling products.
-    
-    - **limit**: Maximum number of best selling products to return
-    """
-    products = get_best_selling_products(db=db, limit=limit)
-    return products
+    """Get best selling products"""
+    try:
+        products = get_best_selling_products(db=db, skip=skip, limit=limit)
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve best selling products: {str(e)}")
 
-
-@app.get(
-    "/products/search/",
-    response_model=List[ProductResponse],
-    tags=["Products"],
-    summary="Search products",
-    description="Search products by name or description"
-)
+@app.get("/api/products/search", response_model=List[ProductResponse], tags=["Products"])
 async def search_products_endpoint(
-    q: str = Query(..., min_length=1, description="Search term"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    q: str = Query(..., min_length=2, description="Search query"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """
-    Search products by name or description.
-    
-    - **q**: Search term (required)
-    - **skip**: Number of records to skip (for pagination)
-    - **limit**: Maximum number of records to return
-    """
-    products = search_products(db=db, search_term=q, skip=skip, limit=limit)
-    return products
+    """Search products by name or description"""
+    try:
+        products = search_products(db=db, query=q, skip=skip, limit=limit)
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search products: {str(e)}")
 
-
-# ========================================
-# CATEGORY ENDPOINTS
-# ========================================
-
-@app.get(
-    "/categories/",
-    response_model=List[CategoryResponse],
-    tags=["Categories"],
-    summary="Get all categories",
-    description="Retrieve a paginated list of product categories"
-)
-async def read_categories(
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of records to return"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get a paginated list of product categories.
-    
-    - **skip**: Number of records to skip (for pagination)
-    - **limit**: Maximum number of records to return (max 100)
-    - **is_active**: Filter by active status
-    """
-    categories = get_categories(db=db, skip=skip, limit=limit, is_active=is_active)
-    return categories
-
-
-@app.get(
-    "/categories/{category_id}",
-    response_model=CategoryResponse,
-    tags=["Categories"],
-    summary="Get category by ID",
-    description="Retrieve a specific category by its UUID"
-)
-async def read_category(
-    category_id: uuid.UUID,
-    db: Session = Depends(get_db)
-):
-    """
-    Get a specific category by its ID.
-    
-    - **category_id**: The UUID of the category to retrieve
-    """
-    category = get_category_by_id(db=db, category_id=category_id)
-    
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category with ID {category_id} not found"
-        )
-    
-    return category
-
-
-# ========================================
-# STATISTICS ENDPOINTS
-# ========================================
-
-@app.get(
-    "/stats/products/count",
-    tags=["Statistics"],
-    summary="Get products count",
-    description="Get the total count of products with optional filtering"
-)
+@app.get("/api/products/count", tags=["Products"])
 async def get_products_count_endpoint(
-    category_id: Optional[uuid.UUID] = Query(None, description="Filter by category ID"),
+    category_id: Optional[uuid.UUID] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get total count of products"""
+    try:
+        count = get_products_count(db=db, category_id=category_id, is_active=is_active)
+        return success_response(data={"count": count}, message="Products count retrieved successfully")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get products count: {str(e)}")
+
+# =============================================================================
+# CATEGORY ENDPOINTS
+# =============================================================================
+
+@app.get("/api/categories/", response_model=List[CategoryResponse], tags=["Categories"])
+async def read_categories(
+    skip: int = Query(0, ge=0, description="Number of categories to skip"),
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of categories to return"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     db: Session = Depends(get_db)
 ):
-    """
-    Get the total count of products with optional filtering.
-    
-    - **category_id**: Filter by specific category
-    - **is_active**: Filter by active status
-    """
-    count = get_products_count(db=db, category_id=category_id, is_active=is_active)
-    
-    return {
-        "count": count,
-        "category_id": category_id,
-        "is_active": is_active
-    }
+    """Get list of categories with optional filtering"""
+    try:
+        categories = get_categories(db=db, skip=skip, limit=limit, is_active=is_active)
+        return [CategoryResponse.from_orm(category) for category in categories]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve categories: {str(e)}")
 
+@app.get("/api/categories/{category_id}", response_model=CategoryResponse, tags=["Categories"])
+async def read_category(category_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Get a specific category by ID"""
+    try:
+        category = get_category_by_id(db=db, category_id=category_id)
+        if category is None:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        return CategoryResponse.from_orm(category)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve category: {str(e)}")
 
-@app.get(
-    "/stats/categories/count",
-    tags=["Statistics"],
-    summary="Get categories count",
-    description="Get the total count of categories with optional filtering"
-)
+@app.get("/api/categories/{category_id}/products", response_model=List[ProductResponse], tags=["Categories"])
+async def read_category_products(
+    category_id: uuid.UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db)
+):
+    """Get products by category ID"""
+    try:
+        products = get_products(db=db, skip=skip, limit=limit, category_id=category_id)
+        return [ProductResponse.from_orm(product) for product in products]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve category products: {str(e)}")
+
+@app.get("/api/categories/count", tags=["Categories"])
 async def get_categories_count_endpoint(
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    is_active: Optional[bool] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """
-    Get the total count of categories with optional filtering.
-    
-    - **is_active**: Filter by active status
-    """
-    count = get_categories_count(db=db, is_active=is_active)
-    
-    return {
-        "count": count,
-        "is_active": is_active
-    }
+    """Get total count of categories"""
+    try:
+        count = get_categories_count(db=db, is_active=is_active)
+        return success_response(data={"count": count}, message="Categories count retrieved successfully")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get categories count: {str(e)}")
 
+# =============================================================================
+# ROOT ENDPOINT
+# =============================================================================
 
-# ========================================
-# ERROR HANDLERS
-# ========================================
-
-@app.exception_handler(404)
-async def not_found_handler(request, exc):
-    """Handle 404 errors with consistent response format."""
-    return {
-        "error": "Not Found",
-        "message": "The requested resource was not found",
-        "path": str(request.url.path)
-    }
-
-
-@app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    """Handle 500 errors with consistent response format."""
-    return {
-        "error": "Internal Server Error",
-        "message": "An unexpected error occurred",
-        "path": str(request.url.path)
-    }
-
-
-# ========================================
-# APPLICATION METADATA
-# ========================================
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information"""
+    return success_response(
+        data={
+            "app_name": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT,
+            "docs_url": "/api/docs",
+            "health_check": "/health"
+        },
+        message="Welcome to Labanita API"
+    )
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Run the application with uvicorn
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,  # Enable auto-reload for development
-        log_level="info"
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL.lower()
     )
