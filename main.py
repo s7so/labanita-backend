@@ -22,6 +22,7 @@ from services import (
     search_products, get_products_count, get_categories_count
 )
 from auth.routes import router as auth_router
+from user.routes import router as user_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,6 +68,9 @@ app.add_middleware(
 
 # Include authentication routes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+
+# Include user management routes
+app.include_router(user_router, prefix="/api/user", tags=["User Management"])
 
 # Global exception handler for custom exceptions
 @app.exception_handler(LabanitaException)
@@ -305,7 +309,13 @@ async def root():
             "version": settings.APP_VERSION,
             "environment": settings.ENVIRONMENT,
             "docs_url": "/api/docs",
-            "health_check": "/health"
+            "health_check": "/health",
+            "available_modules": [
+                "Authentication (/api/auth/*)",
+                "User Management (/api/user/*)",
+                "Products (/api/products/*)",
+                "Categories (/api/categories/*)"
+            ]
         },
         message="Welcome to Labanita API"
     )
