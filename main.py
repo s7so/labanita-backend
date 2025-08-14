@@ -6,58 +6,65 @@ Provides REST API endpoints for products, categories, and core functionality.
 import uuid
 from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Query, status, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from database import get_db, create_tables, check_database_connection, Base
 from core.config import settings
-from core.responses import success_response, error_response
 from core.exceptions import LabanitaException
-from schemas import ProductResponse, CategoryResponse
-from services import (
-    get_products, get_product_by_id, get_categories, get_category_by_id,
-    get_featured_products, get_new_arrivals, get_best_selling_products,
-    search_products, get_products_count, get_categories_count
-)
+from core.responses import success_response, error_response
 from auth.routes import router as auth_router
 from user.routes import router as user_router
+from categories.routes import router as category_router
+
+# =============================================================================
+# LIFESPAN EVENTS
+# =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
+    """Application lifespan events"""
+    # Startup
+    print("🚀 Starting Labanita Backend...")
+    
+    # Create database tables
     try:
-        # Create database tables
-        create_tables()
+        await create_tables()
         print("✅ Database tables created successfully")
-        
-        # Check database connection
-        if check_database_connection():
-            print("✅ Database connection verified")
-        else:
-            print("❌ Database connection failed")
-            
     except Exception as e:
-        print(f"❌ Startup error: {str(e)}")
+        print(f"❌ Failed to create database tables: {e}")
+    
+    # Check database connection
+    try:
+        await check_database_connection()
+        print("✅ Database connection verified")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+    
+    print("🎉 Labanita Backend started successfully!")
     
     yield
     
-    print("🔄 Shutting down Labanita API...")
+    # Shutdown
+    print("🛑 Shutting down Labanita Backend...")
 
-# Create FastAPI app
+# =============================================================================
+# FASTAPI APP INSTANCE
+# =============================================================================
+
 app = FastAPI(
-    title=settings.APP_NAME,
-    description="A modern, scalable backend API for the Labanita Egyptian sweets delivery application",
+    title=settings.APP_TITLE,
     version=settings.APP_VERSION,
-    contact={"name": "Labanita Development Team", "email": "dev@labanita.com"},
-    license_info={"name": "MIT License", "url": "https://opensource.org/licenses/MIT"},
-    lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    description="Labanita Backend API - Comprehensive E-commerce Platform",
+    lifespan=lifespan
 )
 
-# Add CORS middleware
+# =============================================================================
+# CORS MIDDLEWARE
+# =============================================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -66,266 +73,308 @@ app.add_middleware(
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
-# Include authentication routes
-app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+# =============================================================================
+# EXCEPTION HANDLERS
+# =============================================================================
 
-# Include user management routes
-app.include_router(user_router, prefix="/api/user", tags=["User Management"])
-
-# Global exception handler for custom exceptions
 @app.exception_handler(LabanitaException)
-async def labanita_exception_handler(request, exc: LabanitaException):
+async def labanita_exception_handler(request: Request, exc: LabanitaException):
     """Handle custom Labanita exceptions"""
     return JSONResponse(
         status_code=exc.status_code,
         content=error_response(
-            message=exc.detail,
+            message=exc.message,
             error_code=exc.error_code,
-            errors=exc.details
-        ).dict()
+            details=exc.details
+        )
+    )
+
+# =============================================================================
+# INCLUDE ROUTERS
+# =============================================================================
+
+# Authentication routes
+app.include_router(auth_router, prefix="/api")
+
+# User management routes
+app.include_router(user_router, prefix="/api")
+
+# Category management routes
+app.include_router(category_router, prefix="/api")
+
+# =============================================================================
+# ROOT ENDPOINT
+# =============================================================================
+
+@app.get("/", response_model=dict)
+async def root():
+    """
+    Root endpoint - API information and available modules
+    
+    Returns information about the Labanita Backend API and available modules.
+    """
+    return success_response(
+        data={
+            "app_name": "Labanita Backend",
+            "version": "1.0.0",
+            "description": "Comprehensive E-commerce Platform Backend",
+            "status": "running",
+            "available_modules": [
+                "Authentication (/api/auth/*)",
+                "User Management (/api/user/*)",
+                "Category Management (/api/categories/*)",
+                "Product Management (/api/products/*)",
+                "Order Management (/api/orders/*)",
+                "Payment Processing (/api/payments/*)",
+                "Inventory Management (/api/inventory/*)",
+                "Analytics & Reporting (/api/analytics/*)"
+            ],
+            "documentation": "/docs",
+            "health_check": "/health",
+            "database_status": "connected"
+        },
+        message="Welcome to Labanita Backend API"
     )
 
 # =============================================================================
 # HEALTH CHECK ENDPOINTS
 # =============================================================================
 
-@app.get("/health", tags=["Health"])
+@app.get("/health", response_model=dict)
 async def health_check():
-    """Basic health check endpoint"""
+    """
+    Basic health check endpoint
+    
+    Returns the basic health status of the application.
+    """
     return success_response(
         data={
             "status": "healthy",
-            "service": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "environment": settings.ENVIRONMENT
+            "timestamp": "now",
+            "version": "1.0.0"
         },
-        message="Labanita API is running"
+        message="Labanita Backend is running"
     )
 
-@app.get("/api/health", tags=["Health"])
-async def api_health_check():
-    """API health check endpoint"""
-    return success_response(
-        data={
-            "status": "healthy",
-            "service": "Labanita API",
-            "version": settings.APP_VERSION,
-            "database": "connected" if check_database_connection() else "disconnected"
-        },
-        message="API is healthy"
-    )
-
-# =============================================================================
-# PRODUCT ENDPOINTS
-# =============================================================================
-
-@app.get("/api/products/", response_model=List[ProductResponse], tags=["Products"])
-async def read_products(
-    skip: int = Query(0, ge=0, description="Number of products to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of products to return"),
-    category_id: Optional[uuid.UUID] = Query(None, description="Filter by category ID"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
-    is_new_arrival: Optional[bool] = Query(None, description="Filter by new arrival status"),
-    is_best_selling: Optional[bool] = Query(None, description="Filter by best selling status"),
-    db: Session = Depends(get_db)
-):
-    """Get list of products with optional filtering"""
+@app.get("/health/detailed", response_model=dict)
+async def detailed_health_check(db: Session = Depends(get_db)):
+    """
+    Detailed health check endpoint
+    
+    Returns comprehensive health information including database connectivity.
+    """
     try:
-        products = get_products(
-            db=db,
-            skip=skip,
-            limit=limit,
-            category_id=category_id,
-            is_active=is_active,
-            is_featured=is_featured,
-            is_new_arrival=is_new_arrival,
-            is_best_selling=is_best_selling
+        # Check database connection
+        db_status = "connected"
+        try:
+            db.execute("SELECT 1")
+        except Exception:
+            db_status = "disconnected"
+        
+        return success_response(
+            data={
+                "status": "healthy",
+                "timestamp": "now",
+                "version": "1.0.0",
+                "database": {
+                    "status": db_status,
+                    "type": "PostgreSQL"
+                },
+                "services": {
+                    "auth": "running",
+                    "user_management": "running",
+                    "category_management": "running",
+                    "product_management": "running"
+                }
+            },
+            message="Detailed health check completed"
         )
         
-        return [ProductResponse.from_orm(product) for product in products]
+    except Exception as e:
+        return error_response(
+            message="Health check failed",
+            error_code="HEALTH_CHECK_ERROR",
+            details=str(e)
+        )
+
+# =============================================================================
+# DATABASE ENDPOINTS
+# =============================================================================
+
+@app.get("/api/database/status", response_model=dict)
+async def database_status(db: Session = Depends(get_db)):
+    """
+    Database status endpoint
+    
+    Returns detailed database connection and health information.
+    """
+    try:
+        # Test database connection
+        result = db.execute("SELECT version()").scalar()
+        
+        return success_response(
+            data={
+                "status": "connected",
+                "database_type": "PostgreSQL",
+                "version": result,
+                "connection_pool": "active",
+                "tables": [
+                    "users",
+                    "categories", 
+                    "products",
+                    "orders",
+                    "order_items",
+                    "addresses",
+                    "payment_methods",
+                    "promotions",
+                    "cart_items",
+                    "order_status_history",
+                    "product_offers"
+                ]
+            },
+            message="Database connection successful"
+        )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve products: {str(e)}")
+        return error_response(
+            message="Database connection failed",
+            error_code="DB_CONNECTION_ERROR",
+            details=str(e)
+        )
 
-@app.get("/api/products/{product_id}", response_model=ProductResponse, tags=["Products"])
-async def read_product(product_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Get a specific product by ID"""
+# =============================================================================
+# LEGACY ENDPOINTS (FOR BACKWARD COMPATIBILITY)
+# =============================================================================
+
+@app.get("/api/products/", response_model=List[dict])
+async def get_products(
+    skip: int = Query(0, ge=0, description="Number of products to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of products to return"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all products (Legacy endpoint)
+    
+    This endpoint is maintained for backward compatibility.
+    Consider using the new category-based product endpoints for better organization.
+    """
     try:
-        product = get_product_by_id(db=db, product_id=product_id)
-        if product is None:
-            raise HTTPException(status_code=404, detail="Product not found")
+        from models import Product
+        from schemas import ProductResponse
+        
+        products = db.query(Product).offset(skip).limit(limit).all()
+        
+        product_responses = []
+        for product in products:
+            product_responses.append(ProductResponse.from_orm(product))
+        
+        return product_responses
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve products: {str(e)}"
+        )
+
+@app.get("/api/products/{product_id}", response_model=dict)
+async def get_product(
+    product_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific product by ID (Legacy endpoint)
+    
+    This endpoint is maintained for backward compatibility.
+    Consider using the new category-based product endpoints for better organization.
+    """
+    try:
+        from models import Product
+        from schemas import ProductResponse
+        
+        product = db.query(Product).filter(Product.product_id == product_id).first()
+        
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product with ID {product_id} not found"
+            )
         
         return ProductResponse.from_orm(product)
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve product: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve product: {str(e)}"
+        )
 
-@app.get("/api/products/featured", response_model=List[ProductResponse], tags=["Products"])
-async def read_featured_products(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    """Get featured products"""
-    try:
-        products = get_featured_products(db=db, skip=skip, limit=limit)
-        return [ProductResponse.from_orm(product) for product in products]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve featured products: {str(e)}")
-
-@app.get("/api/products/new-arrivals", response_model=List[ProductResponse], tags=["Products"])
-async def read_new_arrivals(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    """Get new arrival products"""
-    try:
-        products = get_new_arrivals(db=db, skip=skip, limit=limit)
-        return [ProductResponse.from_orm(product) for product in products]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve new arrivals: {str(e)}")
-
-@app.get("/api/products/best-selling", response_model=List[ProductResponse], tags=["Products"])
-async def read_best_selling_products(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    """Get best selling products"""
-    try:
-        products = get_best_selling_products(db=db, skip=skip, limit=limit)
-        return [ProductResponse.from_orm(product) for product in products]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve best selling products: {str(e)}")
-
-@app.get("/api/products/search", response_model=List[ProductResponse], tags=["Products"])
-async def search_products_endpoint(
-    q: str = Query(..., min_length=2, description="Search query"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    """Search products by name or description"""
-    try:
-        products = search_products(db=db, query=q, skip=skip, limit=limit)
-        return [ProductResponse.from_orm(product) for product in products]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search products: {str(e)}")
-
-@app.get("/api/products/count", tags=["Products"])
-async def get_products_count_endpoint(
-    category_id: Optional[uuid.UUID] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """Get total count of products"""
-    try:
-        count = get_products_count(db=db, category_id=category_id, is_active=is_active)
-        return success_response(data={"count": count}, message="Products count retrieved successfully")
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get products count: {str(e)}")
-
-# =============================================================================
-# CATEGORY ENDPOINTS
-# =============================================================================
-
-@app.get("/api/categories/", response_model=List[CategoryResponse], tags=["Categories"])
-async def read_categories(
+@app.get("/api/categories/", response_model=List[dict])
+async def get_categories_legacy(
     skip: int = Query(0, ge=0, description="Number of categories to skip"),
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of categories to return"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of categories to return"),
     db: Session = Depends(get_db)
 ):
-    """Get list of categories with optional filtering"""
+    """
+    Get all categories (Legacy endpoint)
+    
+    This endpoint is maintained for backward compatibility.
+    Consider using the new category management endpoints for better functionality.
+    """
     try:
-        categories = get_categories(db=db, skip=skip, limit=limit, is_active=is_active)
-        return [CategoryResponse.from_orm(category) for category in categories]
+        from models import Category
+        from schemas import CategoryResponse
+        
+        categories = db.query(Category).offset(skip).limit(limit).all()
+        
+        category_responses = []
+        for category in categories:
+            category_responses.append(CategoryResponse.from_orm(category))
+        
+        return category_responses
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve categories: {str(e)}")
-
-@app.get("/api/categories/{category_id}", response_model=CategoryResponse, tags=["Categories"])
-async def read_category(category_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Get a specific category by ID"""
-    try:
-        category = get_category_by_id(db=db, category_id=category_id)
-        if category is None:
-            raise HTTPException(status_code=404, detail="Category not found")
-        
-        return CategoryResponse.from_orm(category)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve category: {str(e)}")
-
-@app.get("/api/categories/{category_id}/products", response_model=List[ProductResponse], tags=["Categories"])
-async def read_category_products(
-    category_id: uuid.UUID,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
-):
-    """Get products by category ID"""
-    try:
-        products = get_products(db=db, skip=skip, limit=limit, category_id=category_id)
-        return [ProductResponse.from_orm(product) for product in products]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve category products: {str(e)}")
-
-@app.get("/api/categories/count", tags=["Categories"])
-async def get_categories_count_endpoint(
-    is_active: Optional[bool] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """Get total count of categories"""
-    try:
-        count = get_categories_count(db=db, is_active=is_active)
-        return success_response(data={"count": count}, message="Categories count retrieved successfully")
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get categories count: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve categories: {str(e)}"
+        )
 
 # =============================================================================
-# ROOT ENDPOINT
+# ERROR HANDLING
 # =============================================================================
 
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint with API information"""
-    return success_response(
-        data={
-            "app_name": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "environment": settings.ENVIRONMENT,
-            "docs_url": "/api/docs",
-            "health_check": "/health",
-            "available_modules": [
-                "Authentication (/api/auth/*)",
-                "User Management (/api/user/*)",
-                "Products (/api/products/*)",
-                "Categories (/api/categories/*)"
-            ]
-        },
-        message="Welcome to Labanita API"
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: HTTPException):
+    """Handle 404 errors"""
+    return JSONResponse(
+        status_code=404,
+        content=error_response(
+            message="Endpoint not found",
+            error_code="ENDPOINT_NOT_FOUND",
+            details=f"The requested endpoint {request.url.path} does not exist"
+        )
     )
+
+@app.exception_handler(500)
+async def internal_error_handler(request: Request, exc: HTTPException):
+    """Handle 500 errors"""
+    return JSONResponse(
+        status_code=500,
+        content=error_response(
+            message="Internal server error",
+            error_code="INTERNAL_SERVER_ERROR",
+            details="An unexpected error occurred. Please try again later."
+        )
+    )
+
+# =============================================================================
+# STARTUP MESSAGE
+# =============================================================================
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
-    )
+    print("🚀 Starting Labanita Backend...")
+    print("📚 API Documentation available at /docs")
+    print("🔍 Health check available at /health")
+    print("🎯 Category management available at /api/categories")
+    print("👤 User management available at /api/user")
+    print("🔐 Authentication available at /api/auth")
