@@ -1,8 +1,6 @@
 import os
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import validator
-
 class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Labanita API"
@@ -54,12 +52,6 @@ class Settings(BaseSettings):
     # Google OAuth
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
-    
-    @validator("DATABASE_URL", "SECRET_KEY", "JWT_SECRET_KEY")
-    def validate_required_settings(cls, v, field):
-        if not v:
-            raise ValueError(f"{field.name} is required")
-        return v
     
     class Config:
         env_file = ".env"
