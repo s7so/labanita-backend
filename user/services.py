@@ -14,10 +14,11 @@ from core.exceptions import (
 from core.responses import success_response, error_response
 from core.security import security
 from auth.models import User
-from models import Order, OrderItem, Product, Category
+from models import Order, OrderItem, Product, Category, Address
 from user.schemas import (
     UserUpdate, PointsUpdate, UserProfileResponse, 
-    UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse
+    UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse,
+    AddressCreate, AddressUpdate, AddressResponse, AddressListResponse
 )
 
 class UserService:
@@ -158,6 +159,256 @@ class UserService:
         
         self.db.commit()
         return True
+    
+    # =============================================================================
+    # ADDRESS MANAGEMENT
+    # =============================================================================
+    
+    def get_user_addresses(self, user_id: str) -> AddressListResponse:
+        """Get all addresses for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        addresses = self.db.query(Address).filter(Address.user_id == user_id).all()
+        
+        # Find default address
+        default_address = next((addr for addr in addresses if addr.is_default), None)
+        default_address_id = str(default_address.address_id) if default_address else None
+        
+        address_responses = []
+        for address in addresses:
+            address_responses.append(AddressResponse(
+                address_id=str(address.address_id),
+                user_id=str(address.user_id),
+                address_type=address.address_type,
+                full_name=address.full_name,
+                phone_number=address.phone_number,
+                email=address.email,
+                street_address=address.street_address,
+                building_number=address.building_number,
+                flat_number=address.flat_number,
+                city=address.city,
+                area=address.area,
+                is_default=address.is_default,
+                created_at=address.created_at,
+                updated_at=address.updated_at
+            ))
+        
+        return AddressListResponse(
+            addresses=address_responses,
+            total_count=len(addresses),
+            default_address_id=default_address_id
+        )
+    
+    def get_user_address_by_id(self, user_id: str, address_id: str) -> AddressResponse:
+        """Get a specific address for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        address = self.db.query(Address).filter(
+            Address.address_id == address_id,
+            Address.user_id == user_id
+        ).first()
+        
+        if not address:
+            raise NotFoundException("Address not found")
+        
+        return AddressResponse(
+            address_id=str(address.address_id),
+            user_id=str(address.user_id),
+            address_type=address.address_type,
+            full_name=address.full_name,
+            phone_number=address.phone_number,
+            email=address.email,
+            street_address=address.street_address,
+            building_number=address.building_number,
+            flat_number=address.flat_number,
+            city=address.city,
+            area=address.area,
+            is_default=address.is_default,
+            created_at=address.created_at,
+            updated_at=address.updated_at
+        )
+    
+    def create_user_address(self, user_id: str, address_data: AddressCreate) -> AddressResponse:
+        """Create a new address for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        # If this is set as default, unset other default addresses
+        if address_data.is_default:
+            self.db.query(Address).filter(
+                Address.user_id == user_id,
+                Address.is_default == True
+            ).update({"is_default": False})
+        
+        # Create new address
+        new_address = Address(
+            user_id=user_id,
+            address_type=address_data.address_type,
+            full_name=address_data.full_name,
+            phone_number=address_data.phone_number,
+            email=address_data.email,
+            street_address=address_data.street_address,
+            building_number=address_data.building_number,
+            flat_number=address_data.flat_number,
+            city=address_data.city,
+            area=address_data.area,
+            is_default=address_data.is_default
+        )
+        
+        self.db.add(new_address)
+        self.db.commit()
+        self.db.refresh(new_address)
+        
+        return self.get_user_address_by_id(user_id, str(new_address.address_id))
+    
+    def update_user_address(self, user_id: str, address_id: str, address_data: AddressUpdate) -> AddressResponse:
+        """Update an existing address for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        address = self.db.query(Address).filter(
+            Address.address_id == address_id,
+            Address.user_id == user_id
+        ).first()
+        
+        if not address:
+            raise NotFoundException("Address not found")
+        
+        # Update fields
+        if address_data.address_type is not None:
+            address.address_type = address_data.address_type
+        
+        if address_data.full_name is not None:
+            address.full_name = address_data.full_name
+        
+        if address_data.phone_number is not None:
+            address.phone_number = address_data.phone_number
+        
+        if address_data.email is not None:
+            address.email = address_data.email
+        
+        if address_data.street_address is not None:
+            address.street_address = address_data.street_address
+        
+        if address_data.building_number is not None:
+            address.building_number = address_data.building_number
+        
+        if address_data.flat_number is not None:
+            address.flat_number = address_data.flat_number
+        
+        if address_data.city is not None:
+            address.city = address_data.city
+        
+        if address_data.area is not None:
+            address.area = address_data.area
+        
+        address.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        self.db.refresh(address)
+        
+        return self.get_user_address_by_id(user_id, address_id)
+    
+    def delete_user_address(self, user_id: str, address_id: str) -> bool:
+        """Delete an address for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        address = self.db.query(Address).filter(
+            Address.address_id == address_id,
+            Address.user_id == user_id
+        ).first()
+        
+        if not address:
+            raise NotFoundException("Address not found")
+        
+        # Check if this is the only address
+        total_addresses = self.db.query(Address).filter(Address.user_id == user_id).count()
+        if total_addresses <= 1:
+            raise ValidationException("Cannot delete the only address. Please add another address first.")
+        
+        # If this is the default address, set another address as default
+        if address.is_default:
+            other_address = self.db.query(Address).filter(
+                Address.user_id == user_id,
+                Address.address_id != address_id
+            ).first()
+            if other_address:
+                other_address.is_default = True
+                other_address.updated_at = datetime.utcnow()
+        
+        # Delete the address
+        self.db.delete(address)
+        self.db.commit()
+        
+        return True
+    
+    def set_default_address(self, user_id: str, address_id: str) -> AddressResponse:
+        """Set an address as the default for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        address = self.db.query(Address).filter(
+            Address.address_id == address_id,
+            Address.user_id == user_id
+        ).first()
+        
+        if not address:
+            raise NotFoundException("Address not found")
+        
+        # Unset all other default addresses
+        self.db.query(Address).filter(
+            Address.user_id == user_id,
+            Address.is_default == True
+        ).update({"is_default": False})
+        
+        # Set this address as default
+        address.is_default = True
+        address.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        self.db.refresh(address)
+        
+        return self.get_user_address_by_id(user_id, address_id)
+    
+    def get_default_address(self, user_id: str) -> Optional[AddressResponse]:
+        """Get the default address for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        default_address = self.db.query(Address).filter(
+            Address.user_id == user_id,
+            Address.is_default == True
+        ).first()
+        
+        if not default_address:
+            return None
+        
+        return AddressResponse(
+            address_id=str(default_address.address_id),
+            user_id=str(default_address.user_id),
+            address_type=default_address.address_type,
+            full_name=default_address.full_name,
+            phone_number=default_address.phone_number,
+            email=default_address.email,
+            street_address=default_address.street_address,
+            building_number=default_address.building_number,
+            flat_number=default_address.flat_number,
+            city=default_address.city,
+            area=default_address.area,
+            is_default=default_address.is_default,
+            created_at=default_address.created_at,
+            updated_at=default_address.updated_at
+        )
     
     # =============================================================================
     # POINTS MANAGEMENT

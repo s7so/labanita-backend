@@ -49,6 +49,64 @@ class AccountDeletionRequest(BaseModel):
         return v
 
 # =============================================================================
+# ADDRESS MANAGEMENT SCHEMAS
+# =============================================================================
+
+class AddressCreateRequest(BaseModel):
+    """Request schema for creating a new address"""
+    address_type: str = Field(..., description="Type of address (e.g., 'Home', 'Work', 'Other')")
+    full_name: str = Field(..., min_length=2, max_length=255, description="Full name for delivery")
+    phone_number: str = Field(..., description="Phone number for delivery")
+    email: Optional[EmailStr] = Field(None, description="Email for delivery notifications")
+    street_address: str = Field(..., min_length=5, description="Street address")
+    building_number: Optional[str] = Field(None, max_length=50, description="Building number")
+    flat_number: Optional[str] = Field(None, max_length=50, description="Flat/Apartment number")
+    city: str = Field(..., min_length=2, max_length=100, description="City name")
+    area: Optional[str] = Field(None, max_length=100, description="Area/Neighborhood")
+    is_default: bool = Field(False, description="Set as default address")
+    
+    @validator('phone_number')
+    def validate_phone_number(cls, v):
+        if not re.match(r'^\+[1-9]\d{1,14}$', v):
+            raise ValueError('Phone number must be in international format (e.g., +201234567890)')
+        return v
+    
+    @validator('address_type')
+    def validate_address_type(cls, v):
+        allowed_types = ['Home', 'Work', 'Other', 'home', 'work', 'other']
+        if v not in allowed_types:
+            raise ValueError('Address type must be one of: Home, Work, Other')
+        return v.title()  # Normalize to title case
+
+class AddressUpdateRequest(BaseModel):
+    """Request schema for updating an existing address"""
+    address_type: Optional[str] = Field(None, description="Type of address")
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name for delivery")
+    phone_number: Optional[str] = Field(None, description="Phone number for delivery")
+    email: Optional[EmailStr] = Field(None, description="Email for delivery notifications")
+    street_address: Optional[str] = Field(None, min_length=5, description="Street address")
+    building_number: Optional[str] = Field(None, max_length=50, description="Building number")
+    flat_number: Optional[str] = Field(None, max_length=50, description="Flat/Apartment number")
+    city: Optional[str] = Field(None, min_length=2, max_length=100, description="City name")
+    area: Optional[str] = Field(None, max_length=100, description="Area/Neighborhood")
+    
+    @validator('phone_number')
+    def validate_phone_number(cls, v):
+        if v is not None:
+            if not re.match(r'^\+[1-9]\d{1,14}$', v):
+                raise ValueError('Phone number must be in international format (e.g., +201234567890)')
+        return v
+    
+    @validator('address_type')
+    def validate_address_type(cls, v):
+        if v is not None:
+            allowed_types = ['Home', 'Work', 'Other', 'home', 'work', 'other']
+            if v not in allowed_types:
+                raise ValueError('Address type must be one of: Home, Work, Other')
+            return v.title()  # Normalize to title case
+        return v
+
+# =============================================================================
 # RESPONSE SCHEMAS
 # =============================================================================
 
@@ -115,6 +173,32 @@ class AccountDeletionResponse(BaseModel):
     data_retention_period: int = Field(..., description="Days data will be retained")
     reactivation_deadline: datetime = Field(..., description="Deadline to reactivate account")
 
+class AddressResponse(BaseModel):
+    """Response schema for user address"""
+    address_id: str = Field(..., description="Address unique identifier")
+    user_id: str = Field(..., description="User who owns this address")
+    address_type: str = Field(..., description="Type of address (Home, Work, Other)")
+    full_name: str = Field(..., description="Full name for delivery")
+    phone_number: str = Field(..., description="Phone number for delivery")
+    email: Optional[str] = Field(None, description="Email for delivery notifications")
+    street_address: str = Field(..., description="Street address")
+    building_number: Optional[str] = Field(None, description="Building number")
+    flat_number: Optional[str] = Field(None, description="Flat/Apartment number")
+    city: str = Field(..., description="City name")
+    area: Optional[str] = Field(None, description="Area/Neighborhood")
+    is_default: bool = Field(..., description="Whether this is the default address")
+    created_at: datetime = Field(..., description="When address was created")
+    updated_at: datetime = Field(..., description="When address was last updated")
+    
+    class Config:
+        from_attributes = True
+
+class AddressListResponse(BaseModel):
+    """Response schema for list of addresses"""
+    addresses: List[AddressResponse] = Field(..., description="List of user addresses")
+    total_count: int = Field(..., description="Total number of addresses")
+    default_address_id: Optional[str] = Field(None, description="ID of default address if exists")
+
 # =============================================================================
 # INTERNAL SCHEMAS
 # =============================================================================
@@ -133,6 +217,32 @@ class PointsUpdate(BaseModel):
     change_type: str
     description: str
     order_id: Optional[str] = None
+
+class AddressCreate(BaseModel):
+    """Internal schema for creating address"""
+    user_id: str
+    address_type: str
+    full_name: str
+    phone_number: str
+    email: Optional[str] = None
+    street_address: str
+    building_number: Optional[str] = None
+    flat_number: Optional[str] = None
+    city: str
+    area: Optional[str] = None
+    is_default: bool = False
+
+class AddressUpdate(BaseModel):
+    """Internal schema for updating address"""
+    address_type: Optional[str] = None
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[str] = None
+    street_address: Optional[str] = None
+    building_number: Optional[str] = None
+    flat_number: Optional[str] = None
+    city: Optional[str] = None
+    area: Optional[str] = None
 
 # =============================================================================
 # VALIDATION SCHEMAS

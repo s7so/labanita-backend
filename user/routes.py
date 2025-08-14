@@ -1,5 +1,5 @@
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -14,7 +14,8 @@ from auth.dependencies import get_current_active_user, get_current_verified_user
 from auth.models import User
 from user.schemas import (
     UserProfileUpdateRequest, PasswordChangeRequest, AccountDeletionRequest,
-    UserProfileResponse, UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse
+    UserProfileResponse, UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse,
+    AddressCreateRequest, AddressUpdateRequest, AddressResponse, AddressListResponse
 )
 from user.services import UserService
 
@@ -109,6 +110,180 @@ async def change_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to change password")
+
+# =============================================================================
+# ADDRESS MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@router.get("/addresses", response_model=AddressListResponse)
+async def get_user_addresses(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all addresses for the current user
+    
+    Returns a list of all addresses associated with the authenticated user,
+    including which one is set as default.
+    """
+    try:
+        user_service = UserService(db)
+        addresses = user_service.get_user_addresses(str(current_user.user_id))
+        return addresses
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get addresses")
+
+@router.post("/addresses", response_model=AddressResponse)
+async def create_user_address(
+    request: AddressCreateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new address for the current user
+    
+    Creates a new delivery address. If set as default, it will automatically
+    unset any existing default address.
+    """
+    try:
+        user_service = UserService(db)
+        
+        # Convert request to internal format
+        address_data = AddressCreate(
+            user_id=str(current_user.user_id),
+            address_type=request.address_type,
+            full_name=request.full_name,
+            phone_number=request.phone_number,
+            email=request.email,
+            street_address=request.street_address,
+            building_number=request.building_number,
+            flat_number=request.flat_number,
+            city=request.city,
+            area=request.area,
+            is_default=request.is_default
+        )
+        
+        address = user_service.create_user_address(str(current_user.user_id), address_data)
+        return address
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create address")
+
+@router.put("/addresses/{address_id}", response_model=AddressResponse)
+async def update_user_address(
+    address_id: str = Path(..., description="ID of the address to update"),
+    request: AddressUpdateRequest = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing address for the current user
+    
+    Updates the specified address with new information.
+    Only fields provided in the request will be updated.
+    """
+    try:
+        user_service = UserService(db)
+        
+        # Convert request to internal format
+        update_data = AddressUpdate(**request.dict(exclude_unset=True)) if request else AddressUpdate()
+        
+        address = user_service.update_user_address(str(current_user.user_id), address_id, update_data)
+        return address
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update address")
+
+@router.delete("/addresses/{address_id}", response_model=dict)
+async def delete_user_address(
+    address_id: str = Path(..., description="ID of the address to delete"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete an address for the current user
+    
+    Deletes the specified address. If it's the default address,
+    another address will automatically be set as default.
+    Cannot delete the only address.
+    """
+    try:
+        user_service = UserService(db)
+        
+        success = user_service.delete_user_address(str(current_user.user_id), address_id)
+        
+        if success:
+            return success_response(
+                message="Address deleted successfully",
+                data={"address_id": address_id}
+            )
+        else:
+            return error_response(message="Failed to delete address")
+            
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete address")
+
+@router.put("/addresses/{address_id}/set-default", response_model=AddressResponse)
+async def set_default_address(
+    address_id: str = Path(..., description="ID of the address to set as default"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Set an address as the default for the current user
+    
+    Sets the specified address as the default delivery address.
+    Any previously default address will be unset.
+    """
+    try:
+        user_service = UserService(db)
+        
+        address = user_service.set_default_address(str(current_user.user_id), address_id)
+        return address
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to set default address")
+
+@router.get("/addresses/default", response_model=AddressResponse)
+async def get_default_address(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the default address for the current user
+    
+    Returns the address marked as default for delivery.
+    """
+    try:
+        user_service = UserService(db)
+        
+        address = user_service.get_default_address(str(current_user.user_id))
+        if not address:
+            raise NotFoundException("No default address found")
+        
+        return address
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get default address")
 
 # =============================================================================
 # ACCOUNT MANAGEMENT ENDPOINTS
@@ -363,7 +538,12 @@ async def user_service_health_check():
                 "PUT /api/user/profile",
                 "DELETE /api/user/account",
                 "GET /api/user/points",
-                "GET /api/user/statistics"
+                "GET /api/user/statistics",
+                "GET /api/user/addresses",
+                "POST /api/user/addresses",
+                "PUT /api/user/addresses/{address_id}",
+                "DELETE /api/user/addresses/{address_id}",
+                "PUT /api/user/addresses/{address_id}/set-default"
             ]
         },
         message="User service is running"
