@@ -14,11 +14,12 @@ from core.exceptions import (
 from core.responses import success_response, error_response
 from core.security import security
 from auth.models import User
-from models import Order, OrderItem, Product, Category, Address
+from models import Order, OrderItem, Product, Category, Address, PaymentMethod
 from user.schemas import (
     UserUpdate, PointsUpdate, UserProfileResponse, 
     UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse,
-    AddressCreate, AddressUpdate, AddressResponse, AddressListResponse
+    AddressCreate, AddressUpdate, AddressResponse, AddressListResponse,
+    PaymentMethodCreate, PaymentMethodUpdate, PaymentMethodResponse, PaymentMethodListResponse
 )
 
 class UserService:
@@ -408,6 +409,235 @@ class UserService:
             is_default=default_address.is_default,
             created_at=default_address.created_at,
             updated_at=default_address.updated_at
+        )
+    
+    # =============================================================================
+    # PAYMENT METHOD MANAGEMENT
+    # =============================================================================
+    
+    def get_user_payment_methods(self, user_id: str) -> PaymentMethodListResponse:
+        """Get all payment methods for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        payment_methods = self.db.query(PaymentMethod).filter(PaymentMethod.user_id == user_id).all()
+        
+        # Find default payment method
+        default_payment_method = next((pm for pm in payment_methods if pm.is_default), None)
+        default_payment_method_id = str(default_payment_method.payment_method_id) if default_payment_method else None
+        
+        payment_method_responses = []
+        for payment_method in payment_methods:
+            payment_method_responses.append(PaymentMethodResponse(
+                payment_method_id=str(payment_method.payment_method_id),
+                user_id=str(payment_method.user_id),
+                payment_type=payment_method.payment_type,
+                card_holder_name=payment_method.card_holder_name,
+                card_last_four=payment_method.card_last_four,
+                card_brand=payment_method.card_brand,
+                expiry_month=payment_method.expiry_month,
+                expiry_year=payment_method.expiry_year,
+                is_default=payment_method.is_default,
+                created_at=payment_method.created_at,
+                updated_at=payment_method.updated_at
+            ))
+        
+        return PaymentMethodListResponse(
+            payment_methods=payment_method_responses,
+            total_count=len(payment_methods),
+            default_payment_method_id=default_payment_method_id
+        )
+    
+    def get_user_payment_method_by_id(self, user_id: str, payment_method_id: str) -> PaymentMethodResponse:
+        """Get a specific payment method for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        payment_method = self.db.query(PaymentMethod).filter(
+            PaymentMethod.payment_method_id == payment_method_id,
+            PaymentMethod.user_id == user_id
+        ).first()
+        
+        if not payment_method:
+            raise NotFoundException("Payment method not found")
+        
+        return PaymentMethodResponse(
+            payment_method_id=str(payment_method.payment_method_id),
+            user_id=str(payment_method.user_id),
+            payment_type=payment_method.payment_type,
+            card_holder_name=payment_method.card_holder_name,
+            card_last_four=payment_method.card_last_four,
+            card_brand=payment_method.card_brand,
+            expiry_month=payment_method.expiry_month,
+            expiry_year=payment_method.expiry_year,
+            is_default=payment_method.is_default,
+            created_at=payment_method.created_at,
+            updated_at=payment_method.updated_at
+        )
+    
+    def create_user_payment_method(self, user_id: str, payment_method_data: PaymentMethodCreate) -> PaymentMethodResponse:
+        """Create a new payment method for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        # If this is set as default, unset other default payment methods
+        if payment_method_data.is_default:
+            self.db.query(PaymentMethod).filter(
+                PaymentMethod.user_id == user_id,
+                PaymentMethod.is_default == True
+            ).update({"is_default": False})
+        
+        # Create new payment method
+        new_payment_method = PaymentMethod(
+            user_id=user_id,
+            payment_type=payment_method_data.payment_type,
+            card_holder_name=payment_method_data.card_holder_name,
+            card_last_four=payment_method_data.card_last_four,
+            card_brand=payment_method_data.card_brand,
+            expiry_month=payment_method_data.expiry_month,
+            expiry_year=payment_method_data.expiry_year,
+            is_default=payment_method_data.is_default
+        )
+        
+        self.db.add(new_payment_method)
+        self.db.commit()
+        self.db.refresh(new_payment_method)
+        
+        return self.get_user_payment_method_by_id(user_id, str(new_payment_method.payment_method_id))
+    
+    def update_user_payment_method(self, user_id: str, payment_method_id: str, payment_method_data: PaymentMethodUpdate) -> PaymentMethodResponse:
+        """Update an existing payment method for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        payment_method = self.db.query(PaymentMethod).filter(
+            PaymentMethod.payment_method_id == payment_method_id,
+            PaymentMethod.user_id == user_id
+        ).first()
+        
+        if not payment_method:
+            raise NotFoundException("Payment method not found")
+        
+        # Update fields
+        if payment_method_data.payment_type is not None:
+            payment_method.payment_type = payment_method_data.payment_type
+        
+        if payment_method_data.card_holder_name is not None:
+            payment_method.card_holder_name = payment_method_data.card_holder_name
+        
+        if payment_method_data.card_last_four is not None:
+            payment_method.card_last_four = payment_method_data.card_last_four
+        
+        if payment_method_data.card_brand is not None:
+            payment_method.card_brand = payment_method_data.card_brand
+        
+        if payment_method_data.expiry_month is not None:
+            payment_method.expiry_month = payment_method_data.expiry_month
+        
+        if payment_method_data.expiry_year is not None:
+            payment_method.expiry_year = payment_method_data.expiry_year
+        
+        payment_method.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        self.db.refresh(payment_method)
+        
+        return self.get_user_payment_method_by_id(user_id, payment_method_id)
+    
+    def delete_user_payment_method(self, user_id: str, payment_method_id: str) -> bool:
+        """Delete a payment method for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        payment_method = self.db.query(PaymentMethod).filter(
+            PaymentMethod.payment_method_id == payment_method_id,
+            PaymentMethod.user_id == user_id
+        ).first()
+        
+        if not payment_method:
+            raise NotFoundException("Payment method not found")
+        
+        # Check if this is the only payment method
+        total_payment_methods = self.db.query(PaymentMethod).filter(PaymentMethod.user_id == user_id).count()
+        if total_payment_methods <= 1:
+            raise ValidationException("Cannot delete the only payment method. Please add another payment method first.")
+        
+        # If this is the default payment method, set another one as default
+        if payment_method.is_default:
+            other_payment_method = self.db.query(PaymentMethod).filter(
+                PaymentMethod.user_id == user_id,
+                PaymentMethod.payment_method_id != payment_method_id
+            ).first()
+            if other_payment_method:
+                other_payment_method.is_default = True
+                other_payment_method.updated_at = datetime.utcnow()
+        
+        # Delete the payment method
+        self.db.delete(payment_method)
+        self.db.commit()
+        
+        return True
+    
+    def set_default_payment_method(self, user_id: str, payment_method_id: str) -> PaymentMethodResponse:
+        """Set a payment method as the default for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        payment_method = self.db.query(PaymentMethod).filter(
+            PaymentMethod.payment_method_id == payment_method_id,
+            PaymentMethod.user_id == user_id
+        ).first()
+        
+        if not payment_method:
+            raise NotFoundException("Payment method not found")
+        
+        # Unset all other default payment methods
+        self.db.query(PaymentMethod).filter(
+            PaymentMethod.user_id == user_id,
+            PaymentMethod.is_default == True
+        ).update({"is_default": False})
+        
+        # Set this payment method as default
+        payment_method.is_default = True
+        payment_method.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        self.db.refresh(payment_method)
+        
+        return self.get_user_payment_method_by_id(user_id, payment_method_id)
+    
+    def get_default_payment_method(self, user_id: str) -> Optional[PaymentMethodResponse]:
+        """Get the default payment method for a user"""
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise NotFoundException("User not found")
+        
+        default_payment_method = self.db.query(PaymentMethod).filter(
+            PaymentMethod.user_id == user_id,
+            PaymentMethod.is_default == True
+        ).first()
+        
+        if not default_payment_method:
+            return None
+        
+        return PaymentMethodResponse(
+            payment_method_id=str(default_payment_method.payment_method_id),
+            user_id=str(default_payment_method.user_id),
+            payment_type=default_payment_method.payment_type,
+            card_holder_name=default_payment_method.card_holder_name,
+            card_last_four=default_payment_method.card_last_four,
+            card_brand=default_payment_method.card_brand,
+            expiry_month=default_payment_method.expiry_month,
+            expiry_year=default_payment_method.expiry_year,
+            is_default=default_payment_method.is_default,
+            created_at=default_payment_method.created_at,
+            updated_at=default_payment_method.updated_at
         )
     
     # =============================================================================

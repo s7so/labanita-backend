@@ -107,6 +107,75 @@ class AddressUpdateRequest(BaseModel):
         return v
 
 # =============================================================================
+# PAYMENT METHOD MANAGEMENT SCHEMAS
+# =============================================================================
+
+class PaymentMethodCreateRequest(BaseModel):
+    """Request schema for creating a new payment method"""
+    payment_type: str = Field(..., description="Type of payment method (CARD, APPLE_PAY, CASH)")
+    card_holder_name: Optional[str] = Field(None, max_length=255, description="Card holder name")
+    card_last_four: Optional[str] = Field(None, max_length=4, description="Last 4 digits of card")
+    card_brand: Optional[str] = Field(None, max_length=50, description="Card brand (Visa, Mastercard, etc.)")
+    expiry_month: Optional[int] = Field(None, ge=1, le=12, description="Card expiry month (1-12)")
+    expiry_year: Optional[int] = Field(None, ge=2024, description="Card expiry year")
+    is_default: bool = Field(False, description="Set as default payment method")
+    
+    @validator('payment_type')
+    def validate_payment_type(cls, v):
+        allowed_types = ['CARD', 'APPLE_PAY', 'CASH', 'card', 'apple_pay', 'cash']
+        if v not in allowed_types:
+            raise ValueError('Payment type must be one of: CARD, APPLE_PAY, CASH')
+        return v.upper()  # Normalize to uppercase
+    
+    @validator('card_last_four')
+    def validate_card_last_four(cls, v):
+        if v is not None:
+            if not re.match(r'^\d{4}$', v):
+                raise ValueError('Card last four must be exactly 4 digits')
+        return v
+    
+    @validator('expiry_year')
+    def validate_expiry_year(cls, v):
+        if v is not None:
+            current_year = datetime.now().year
+            if v < current_year:
+                raise ValueError('Card expiry year cannot be in the past')
+        return v
+
+class PaymentMethodUpdateRequest(BaseModel):
+    """Request schema for updating an existing payment method"""
+    payment_type: Optional[str] = Field(None, description="Type of payment method")
+    card_holder_name: Optional[str] = Field(None, max_length=255, description="Card holder name")
+    card_last_four: Optional[str] = Field(None, max_length=4, description="Last 4 digits of card")
+    card_brand: Optional[str] = Field(None, max_length=50, description="Card brand")
+    expiry_month: Optional[int] = Field(None, ge=1, le=12, description="Card expiry month")
+    expiry_year: Optional[int] = Field(None, ge=2024, description="Card expiry year")
+    
+    @validator('payment_type')
+    def validate_payment_type(cls, v):
+        if v is not None:
+            allowed_types = ['CARD', 'APPLE_PAY', 'CASH', 'card', 'apple_pay', 'cash']
+            if v not in allowed_types:
+                raise ValueError('Payment type must be one of: CARD, APPLE_PAY, CASH')
+            return v.upper()
+        return v
+    
+    @validator('card_last_four')
+    def validate_card_last_four(cls, v):
+        if v is not None:
+            if not re.match(r'^\d{4}$', v):
+                raise ValueError('Card last four must be exactly 4 digits')
+        return v
+    
+    @validator('expiry_year')
+    def validate_expiry_year(cls, v):
+        if v is not None:
+            current_year = datetime.now().year
+            if v < current_year:
+                raise ValueError('Card expiry year cannot be in the past')
+        return v
+
+# =============================================================================
 # RESPONSE SCHEMAS
 # =============================================================================
 
@@ -199,6 +268,29 @@ class AddressListResponse(BaseModel):
     total_count: int = Field(..., description="Total number of addresses")
     default_address_id: Optional[str] = Field(None, description="ID of default address if exists")
 
+class PaymentMethodResponse(BaseModel):
+    """Response schema for user payment method"""
+    payment_method_id: str = Field(..., description="Payment method unique identifier")
+    user_id: str = Field(..., description="User who owns this payment method")
+    payment_type: str = Field(..., description="Type of payment method (CARD, APPLE_PAY, CASH)")
+    card_holder_name: Optional[str] = Field(None, description="Card holder name")
+    card_last_four: Optional[str] = Field(None, description="Last 4 digits of card")
+    card_brand: Optional[str] = Field(None, description="Card brand")
+    expiry_month: Optional[int] = Field(None, description="Card expiry month")
+    expiry_year: Optional[int] = Field(None, description="Card expiry year")
+    is_default: bool = Field(..., description="Whether this is the default payment method")
+    created_at: datetime = Field(..., description="When payment method was created")
+    updated_at: datetime = Field(..., description="When payment method was last updated")
+    
+    class Config:
+        from_attributes = True
+
+class PaymentMethodListResponse(BaseModel):
+    """Response schema for list of payment methods"""
+    payment_methods: List[PaymentMethodResponse] = Field(..., description="List of user payment methods")
+    total_count: int = Field(..., description="Total number of payment methods")
+    default_payment_method_id: Optional[str] = Field(None, description="ID of default payment method if exists")
+
 # =============================================================================
 # INTERNAL SCHEMAS
 # =============================================================================
@@ -243,6 +335,26 @@ class AddressUpdate(BaseModel):
     flat_number: Optional[str] = None
     city: Optional[str] = None
     area: Optional[str] = None
+
+class PaymentMethodCreate(BaseModel):
+    """Internal schema for creating payment method"""
+    user_id: str
+    payment_type: str
+    card_holder_name: Optional[str] = None
+    card_last_four: Optional[str] = None
+    card_brand: Optional[str] = None
+    expiry_month: Optional[int] = None
+    expiry_year: Optional[int] = None
+    is_default: bool = False
+
+class PaymentMethodUpdate(BaseModel):
+    """Internal schema for updating payment method"""
+    payment_type: Optional[str] = None
+    card_holder_name: Optional[str] = None
+    card_last_four: Optional[str] = None
+    card_brand: Optional[str] = None
+    expiry_month: Optional[int] = None
+    expiry_year: Optional[int] = None
 
 # =============================================================================
 # VALIDATION SCHEMAS

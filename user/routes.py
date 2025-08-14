@@ -15,7 +15,8 @@ from auth.models import User
 from user.schemas import (
     UserProfileUpdateRequest, PasswordChangeRequest, AccountDeletionRequest,
     UserProfileResponse, UserPointsResponse, UserPointsHistoryResponse, UserStatsResponse,
-    AddressCreateRequest, AddressUpdateRequest, AddressResponse, AddressListResponse
+    AddressCreateRequest, AddressUpdateRequest, AddressResponse, AddressListResponse,
+    PaymentMethodCreateRequest, PaymentMethodUpdateRequest, PaymentMethodResponse, PaymentMethodListResponse
 )
 from user.services import UserService
 
@@ -286,6 +287,177 @@ async def get_default_address(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get default address")
 
 # =============================================================================
+# PAYMENT METHOD MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@router.get("/payment-methods", response_model=PaymentMethodListResponse)
+async def get_user_payment_methods(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all payment methods for the current user
+    
+    Returns a list of all payment methods associated with the authenticated user,
+    including which one is set as default.
+    """
+    try:
+        user_service = UserService(db)
+        payment_methods = user_service.get_user_payment_methods(str(current_user.user_id))
+        return payment_methods
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get payment methods")
+
+@router.post("/payment-methods", response_model=PaymentMethodResponse)
+async def create_user_payment_method(
+    request: PaymentMethodCreateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new payment method for the current user
+    
+    Creates a new payment method (card, Apple Pay, or cash).
+    If set as default, it will automatically unset any existing default payment method.
+    """
+    try:
+        user_service = UserService(db)
+        
+        # Convert request to internal format
+        payment_method_data = PaymentMethodCreate(
+            user_id=str(current_user.user_id),
+            payment_type=request.payment_type,
+            card_holder_name=request.card_holder_name,
+            card_last_four=request.card_last_four,
+            card_brand=request.card_brand,
+            expiry_month=request.expiry_month,
+            expiry_year=request.expiry_year,
+            is_default=request.is_default
+        )
+        
+        payment_method = user_service.create_user_payment_method(str(current_user.user_id), payment_method_data)
+        return payment_method
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create payment method")
+
+@router.put("/payment-methods/{payment_method_id}", response_model=PaymentMethodResponse)
+async def update_user_payment_method(
+    payment_method_id: str = Path(..., description="ID of the payment method to update"),
+    request: PaymentMethodUpdateRequest = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing payment method for the current user
+    
+    Updates the specified payment method with new information.
+    Only fields provided in the request will be updated.
+    """
+    try:
+        user_service = UserService(db)
+        
+        # Convert request to internal format
+        update_data = PaymentMethodUpdate(**request.dict(exclude_unset=True)) if request else PaymentMethodUpdate()
+        
+        payment_method = user_service.update_user_payment_method(str(current_user.user_id), payment_method_id, update_data)
+        return payment_method
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update payment method")
+
+@router.delete("/payment-methods/{payment_method_id}", response_model=dict)
+async def delete_user_payment_method(
+    payment_method_id: str = Path(..., description="ID of the payment method to delete"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a payment method for the current user
+    
+    Deletes the specified payment method. If it's the default payment method,
+    another payment method will automatically be set as default.
+    Cannot delete the only payment method.
+    """
+    try:
+        user_service = UserService(db)
+        
+        success = user_service.delete_user_payment_method(str(current_user.user_id), payment_method_id)
+        
+        if success:
+            return success_response(
+                message="Payment method deleted successfully",
+                data={"payment_method_id": payment_method_id}
+            )
+        else:
+            return error_response(message="Failed to delete payment method")
+            
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete payment method")
+
+@router.put("/payment-methods/{payment_method_id}/set-default", response_model=PaymentMethodResponse)
+async def set_default_payment_method(
+    payment_method_id: str = Path(..., description="ID of the payment method to set as default"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Set a payment method as the default for the current user
+    
+    Sets the specified payment method as the default for transactions.
+    Any previously default payment method will be unset.
+    """
+    try:
+        user_service = UserService(db)
+        
+        payment_method = user_service.set_default_payment_method(str(current_user.user_id), payment_method_id)
+        return payment_method
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to set default payment method")
+
+@router.get("/payment-methods/default", response_model=PaymentMethodResponse)
+async def get_default_payment_method(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the default payment method for the current user
+    
+    Returns the payment method marked as default for transactions.
+    """
+    try:
+        user_service = UserService(db)
+        
+        payment_method = user_service.get_default_payment_method(str(current_user.user_id))
+        if not payment_method:
+            raise NotFoundException("No default payment method found")
+        
+        return payment_method
+        
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get default payment method")
+
+# =============================================================================
 # ACCOUNT MANAGEMENT ENDPOINTS
 # =============================================================================
 
@@ -543,7 +715,12 @@ async def user_service_health_check():
                 "POST /api/user/addresses",
                 "PUT /api/user/addresses/{address_id}",
                 "DELETE /api/user/addresses/{address_id}",
-                "PUT /api/user/addresses/{address_id}/set-default"
+                "PUT /api/user/addresses/{address_id}/set-default",
+                "GET /api/user/payment-methods",
+                "POST /api/user/payment-methods",
+                "PUT /api/user/payment-methods/{payment_method_id}",
+                "DELETE /api/user/payment-methods/{payment_method_id}",
+                "PUT /api/user/payment-methods/{payment_method_id}/set-default"
             ]
         },
         message="User service is running"
