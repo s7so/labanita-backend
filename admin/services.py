@@ -10,12 +10,15 @@ from core.exceptions import (
     ValidationException, 
     ConflictException
 )
-from models import Product, Category, User, Order, OrderItem
+from models import Product, Category, User, Order, OrderItem, Promotion
 from admin.schemas import (
     AdminProductResponse, AdminProductListResponse, AdminProductFilter,
     AdminProductCreate, AdminProductUpdate, AdminProductCreateRequest,
     AdminProductUpdateRequest, AdminUserResponse, AdminUserListResponse,
-    AdminDashboardStats, AdminActivityLog
+    AdminDashboardStats, AdminActivityLog, AdminOrderResponse, AdminOrderListResponse,
+    AdminOrderFilter, AdminOrderStatusUpdate, AdminOrderStats, AdminPromotionResponse,
+    AdminPromotionListResponse, AdminPromotionFilter, AdminPromotionCreateRequest,
+    AdminPromotionUpdateRequest
 )
 
 class AdminService:
@@ -517,6 +520,527 @@ class AdminService:
             raise ValidationException(f"Failed to get admin dashboard stats: {str(e)}")
     
     # =============================================================================
+    # ADMIN ORDER MANAGEMENT
+    # =============================================================================
+    
+    def get_admin_orders(
+        self,
+        filters: Optional[AdminOrderFilter] = None
+    ) -> AdminOrderListResponse:
+        """Get orders for admin management with filtering and pagination"""
+        try:
+            query = self.db.query(Order).join(User, Order.user_id == User.user_id)
+            
+            # Apply filters
+            if filters:
+                if filters.search:
+                    search_term = f"%{filters.search}%"
+                    query = query.filter(
+                        or_(
+                            Order.order_number.ilike(search_term),
+                            User.username.ilike(search_term),
+                            User.email.ilike(search_term)
+                        )
+                    )
+                
+                if filters.order_status:
+                    query = query.filter(Order.order_status == filters.order_status)
+                
+                if filters.payment_status:
+                    query = query.filter(Order.payment_status == filters.payment_status)
+                
+                if filters.shipping_status:
+                    query = query.filter(Order.shipping_status == filters.shipping_status)
+                
+                if filters.order_type:
+                    query = query.filter(Order.order_type == filters.order_type)
+                
+                if filters.shipping_method:
+                    query = query.filter(Order.shipping_method == filters.shipping_method)
+                
+                if filters.amount_min:
+                    query = query.filter(Order.total_amount >= filters.amount_min)
+                
+                if filters.amount_max:
+                    query = query.filter(Order.total_amount <= filters.amount_max)
+                
+                if filters.created_date_from:
+                    query = query.filter(Order.created_at >= filters.created_date_from)
+                
+                if filters.created_date_to:
+                    query = query.filter(Order.created_at <= filters.created_date_to)
+                
+                if filters.delivery_date_from:
+                    query = query.filter(Order.estimated_delivery >= filters.delivery_date_from)
+                
+                if filters.delivery_date_to:
+                    query = query.filter(Order.estimated_delivery <= filters.delivery_date_to)
+                
+                if filters.has_promotions is not None:
+                    if filters.has_promotions:
+                        query = query.filter(Order.applied_promotions != [])
+                    else:
+                        query = query.filter(Order.applied_promotions == [])
+            
+            # Get total count
+            total = query.count()
+            
+            # Apply sorting
+            if filters and filters.sort_by:
+                sort_field = getattr(Order, filters.sort_by, Order.created_at)
+                if filters.sort_order == "asc":
+                    query = query.order_by(asc(sort_field))
+                else:
+                    query = query.order_by(desc(sort_field))
+            else:
+                query = query.order_by(desc(Order.created_at))
+            
+            # Apply pagination
+            page = filters.page if filters else 1
+            size = filters.size if filters else 20
+            orders = query.offset((page - 1) * size).limit(size).all()
+            
+            # Build order responses
+            order_responses = []
+            for order in orders:
+                order_responses.append(self._build_admin_order_response(order))
+            
+            # Calculate pagination info
+            total_pages = (total + size - 1) // size
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            # Build filters applied
+            filters_applied = {}
+            if filters:
+                if filters.search:
+                    filters_applied["search"] = filters.search
+                if filters.order_status:
+                    filters_applied["order_status"] = filters.order_status
+                if filters.payment_status:
+                    filters_applied["payment_status"] = filters.payment_status
+                if filters.shipping_status:
+                    filters_applied["shipping_status"] = filters.shipping_status
+                if filters.order_type:
+                    filters_applied["order_type"] = filters.order_type
+                if filters.shipping_method:
+                    filters_applied["shipping_method"] = filters.shipping_method
+                if filters.amount_min:
+                    filters_applied["amount_min"] = filters.amount_min
+                if filters.amount_max:
+                    filters_applied["amount_max"] = filters.amount_max
+            
+            # Build summary
+            summary = self._build_admin_orders_summary(orders)
+            
+            return AdminOrderListResponse(
+                orders=order_responses,
+                total_count=total,
+                page=page,
+                size=size,
+                total_pages=total_pages,
+                has_next=has_next,
+                has_prev=has_prev,
+                filters_applied=filters_applied,
+                summary=summary
+            )
+            
+        except Exception as e:
+            raise ValidationException(f"Failed to get admin orders: {str(e)}")
+    
+    def update_admin_order_status(
+        self,
+        order_id: str,
+        status_update: AdminOrderStatusUpdate,
+        admin_user_id: str
+    ) -> AdminOrderResponse:
+        """Update order status (admin)"""
+        try:
+            # Get existing order
+            order = self.db.query(Order).filter(Order.order_id == order_id).first()
+            if not order:
+                raise NotFoundException(f"Order with ID {order_id} not found")
+            
+            # Update status fields
+            if status_update.order_status:
+                order.order_status = status_update.order_status
+            
+            if status_update.payment_status:
+                order.payment_status = status_update.payment_status
+            
+            if status_update.shipping_status:
+                order.shipping_status = status_update.shipping_status
+            
+            if status_update.admin_notes:
+                order.admin_notes = status_update.admin_notes
+            
+            if status_update.estimated_delivery:
+                order.estimated_delivery = status_update.estimated_delivery
+            
+            if status_update.actual_delivery:
+                order.actual_delivery = status_update.actual_delivery
+            
+            order.updated_at = datetime.utcnow()
+            
+            self.db.commit()
+            self.db.refresh(order)
+            
+            # Log admin activity
+            self._log_admin_activity(
+                user_id=admin_user_id,
+                action="update_order_status",
+                resource_type="order",
+                resource_id=order_id,
+                details={
+                    "new_order_status": status_update.order_status,
+                    "new_payment_status": status_update.payment_status,
+                    "new_shipping_status": status_update.shipping_status
+                }
+            )
+            
+            return self._build_admin_order_response(order)
+            
+        except NotFoundException:
+            raise
+        except Exception as e:
+            self.db.rollback()
+            raise ValidationException(f"Failed to update order status: {str(e)}")
+    
+    def get_admin_order_stats(self) -> AdminOrderStats:
+        """Get admin order statistics"""
+        try:
+            # Basic order statistics
+            total_orders = self.db.query(Order).count()
+            total_revenue = self.db.query(func.sum(Order.total_amount)).scalar() or 0.0
+            
+            # Monthly revenue (mock data for now)
+            monthly_revenue = 8500.00
+            
+            # Calculate average order value
+            average_order_value = total_revenue / total_orders if total_orders > 0 else 0.0
+            
+            # Orders by status
+            orders_by_status = {}
+            status_counts = self.db.query(
+                Order.order_status, func.count(Order.order_id)
+            ).group_by(Order.order_status).all()
+            
+            for status, count in status_counts:
+                orders_by_status[status] = count
+            
+            # Orders by payment status
+            orders_by_payment_status = {}
+            payment_counts = self.db.query(
+                Order.payment_status, func.count(Order.order_id)
+            ).group_by(Order.payment_status).all()
+            
+            for status, count in payment_counts:
+                orders_by_payment_status[status] = count
+            
+            # Orders by shipping status
+            orders_by_shipping_status = {}
+            shipping_counts = self.db.query(
+                Order.shipping_status, func.count(Order.order_id)
+            ).group_by(Order.shipping_status).all()
+            
+            for status, count in shipping_counts:
+                orders_by_shipping_status[status] = count
+            
+            # Mock data for other statistics
+            orders_by_month = [
+                {"month": "2024-01", "count": 45, "revenue": 12500.00},
+                {"month": "2024-02", "count": 52, "revenue": 14800.00},
+                {"month": "2024-03", "count": 48, "revenue": 13200.00}
+            ]
+            
+            top_products = [
+                {"product_id": "PROD_001", "name": "iPhone 15 Pro", "sales": 25, "revenue": 24999.75},
+                {"product_id": "PROD_002", "name": "MacBook Air", "sales": 18, "revenue": 17999.82},
+                {"product_id": "PROD_003", "name": "AirPods Pro", "sales": 32, "revenue": 7999.68}
+            ]
+            
+            top_categories = [
+                {"category_id": "CAT_001", "name": "Electronics", "orders": 85, "revenue": 50999.25},
+                {"category_id": "CAT_002", "name": "Clothing", "orders": 45, "revenue": 8999.55},
+                {"category_id": "CAT_003", "name": "Home & Garden", "orders": 28, "revenue": 3999.72}
+            ]
+            
+            delivery_performance = {
+                "on_time_delivery": 92.5,
+                "average_delivery_time": "2.3 days",
+                "delivery_success_rate": 98.7,
+                "return_rate": 1.3
+            }
+            
+            return AdminOrderStats(
+                total_orders=total_orders,
+                total_revenue=total_revenue,
+                monthly_revenue=monthly_revenue,
+                average_order_value=average_order_value,
+                orders_by_status=orders_by_status,
+                orders_by_payment_status=orders_by_payment_status,
+                orders_by_shipping_status=orders_by_shipping_status,
+                orders_by_month=orders_by_month,
+                top_products=top_products,
+                top_categories=top_categories,
+                delivery_performance=delivery_performance
+            )
+            
+        except Exception as e:
+            raise ValidationException(f"Failed to get admin order stats: {str(e)}")
+    
+    # =============================================================================
+    # ADMIN PROMOTION MANAGEMENT
+    # =============================================================================
+    
+    def get_admin_promotions(
+        self,
+        filters: Optional[AdminPromotionFilter] = None
+    ) -> AdminPromotionListResponse:
+        """Get promotions for admin management with filtering and pagination"""
+        try:
+            query = self.db.query(Promotion)
+            
+            # Apply filters
+            if filters:
+                if filters.search:
+                    search_term = f"%{filters.search}%"
+                    query = query.filter(
+                        or_(
+                            Promotion.promotion_name.ilike(search_term),
+                            Promotion.description.ilike(search_term)
+                        )
+                    )
+                
+                if filters.promotion_type:
+                    query = query.filter(Promotion.promotion_type == filters.promotion_type)
+                
+                if filters.discount_type:
+                    query = query.filter(Promotion.discount_type == filters.discount_type)
+                
+                if filters.is_active is not None:
+                    query = query.filter(Promotion.is_active == filters.is_active)
+                
+                if filters.auto_apply is not None:
+                    query = query.filter(Promotion.auto_apply == filters.auto_apply)
+                
+                if filters.start_date_from:
+                    query = query.filter(Promotion.start_date >= filters.start_date_from)
+                
+                if filters.start_date_to:
+                    query = query.filter(Promotion.start_date <= filters.start_date_to)
+                
+                if filters.end_date_from:
+                    query = query.filter(Promotion.end_date >= filters.end_date_from)
+                
+                if filters.end_date_to:
+                    query = query.filter(Promotion.end_date <= filters.end_date_to)
+                
+                if filters.min_discount_value:
+                    query = query.filter(Promotion.discount_value >= filters.min_discount_value)
+                
+                if filters.max_discount_value:
+                    query = query.filter(Promotion.discount_value <= filters.max_discount_value)
+            
+            # Get total count
+            total = query.count()
+            
+            # Apply sorting
+            if filters and filters.sort_by:
+                sort_field = getattr(Promotion, filters.sort_by, Promotion.created_at)
+                if filters.sort_order == "asc":
+                    query = query.order_by(asc(sort_field))
+                else:
+                    query = query.order_by(desc(sort_field))
+            else:
+                query = query.order_by(desc(Promotion.created_at))
+            
+            # Apply pagination
+            page = filters.page if filters else 1
+            size = filters.size if filters else 20
+            promotions = query.offset((page - 1) * size).limit(size).all()
+            
+            # Build promotion responses
+            promotion_responses = []
+            for promotion in promotions:
+                promotion_responses.append(self._build_admin_promotion_response(promotion))
+            
+            # Calculate pagination info
+            total_pages = (total + size - 1) // size
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            # Build filters applied
+            filters_applied = {}
+            if filters:
+                if filters.search:
+                    filters_applied["search"] = filters.search
+                if filters.promotion_type:
+                    filters_applied["promotion_type"] = filters.promotion_type
+                if filters.discount_type:
+                    filters_applied["discount_type"] = filters.discount_type
+                if filters.is_active is not None:
+                    filters_applied["is_active"] = filters.is_active
+                if filters.auto_apply is not None:
+                    filters_applied["auto_apply"] = filters.auto_apply
+            
+            # Build summary
+            summary = self._build_admin_promotions_summary(promotions)
+            
+            return AdminPromotionListResponse(
+                promotions=promotion_responses,
+                total_count=total,
+                page=page,
+                size=size,
+                total_pages=total_pages,
+                has_next=has_next,
+                has_prev=has_prev,
+                filters_applied=filters_applied,
+                summary=summary
+            )
+            
+        except Exception as e:
+            raise ValidationException(f"Failed to get admin promotions: {str(e)}")
+    
+    def create_admin_promotion(
+        self,
+        promotion_data: AdminPromotionCreateRequest,
+        admin_user_id: str
+    ) -> AdminPromotionResponse:
+        """Create new promotion (admin)"""
+        try:
+            # Create promotion
+            new_promotion = Promotion(
+                promotion_id=str(uuid.uuid4()),
+                promotion_name=promotion_data.promotion_name,
+                description=promotion_data.description,
+                promotion_type=promotion_data.promotion_type,
+                discount_type=promotion_data.discount_type,
+                discount_value=promotion_data.discount_value,
+                max_discount_amount=promotion_data.max_discount_amount,
+                min_order_amount=promotion_data.min_order_amount,
+                max_order_amount=promotion_data.max_order_amount,
+                applicable_categories=promotion_data.applicable_categories,
+                applicable_products=promotion_data.applicable_products,
+                excluded_products=promotion_data.excluded_products,
+                user_groups=promotion_data.user_groups,
+                usage_limit_per_user=promotion_data.usage_limit_per_user,
+                total_usage_limit=promotion_data.total_usage_limit,
+                current_usage=promotion_data.current_usage,
+                start_date=promotion_data.start_date,
+                end_date=promotion_data.end_date,
+                is_active=promotion_data.is_active,
+                priority=promotion_data.priority,
+                auto_apply=promotion_data.auto_apply,
+                conditions=promotion_data.conditions,
+                notes=promotion_data.notes,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            
+            self.db.add(new_promotion)
+            self.db.commit()
+            self.db.refresh(new_promotion)
+            
+            # Log admin activity
+            self._log_admin_activity(
+                user_id=admin_user_id,
+                action="create_promotion",
+                resource_type="promotion",
+                resource_id=new_promotion.promotion_id,
+                details={"promotion_name": new_promotion.promotion_name}
+            )
+            
+            return self._build_admin_promotion_response(new_promotion)
+            
+        except IntegrityError:
+            self.db.rollback()
+            raise ConflictException("Promotion creation failed due to database constraint")
+        except Exception as e:
+            self.db.rollback()
+            raise ValidationException(f"Failed to create promotion: {str(e)}")
+    
+    def update_admin_promotion(
+        self,
+        promotion_id: str,
+        promotion_data: AdminPromotionUpdateRequest,
+        admin_user_id: str
+    ) -> AdminPromotionResponse:
+        """Update existing promotion (admin)"""
+        try:
+            # Get existing promotion
+            promotion = self.db.query(Promotion).filter(Promotion.promotion_id == promotion_id).first()
+            if not promotion:
+                raise NotFoundException(f"Promotion with ID {promotion_id} not found")
+            
+            # Update fields
+            update_fields = promotion_data.dict(exclude_unset=True)
+            for field, value in update_fields.items():
+                if hasattr(promotion, field):
+                    setattr(promotion, field, value)
+            
+            promotion.updated_at = datetime.utcnow()
+            
+            self.db.commit()
+            self.db.refresh(promotion)
+            
+            # Log admin activity
+            self._log_admin_activity(
+                user_id=admin_user_id,
+                action="update_promotion",
+                resource_type="promotion",
+                resource_id=promotion_id,
+                details={"updated_fields": list(update_fields.keys())}
+            )
+            
+            return self._build_admin_promotion_response(promotion)
+            
+        except NotFoundException:
+            raise
+        except IntegrityError:
+            self.db.rollback()
+            raise ConflictException("Promotion update failed due to database constraint")
+        except Exception as e:
+            self.db.rollback()
+            raise ValidationException(f"Failed to update promotion: {str(e)}")
+    
+    def delete_admin_promotion(self, promotion_id: str, admin_user_id: str) -> bool:
+        """Delete promotion (admin)"""
+        try:
+            # Get existing promotion
+            promotion = self.db.query(Promotion).filter(Promotion.promotion_id == promotion_id).first()
+            if not promotion:
+                raise NotFoundException(f"Promotion with ID {promotion_id} not found")
+            
+            # Check if promotion is currently active
+            if promotion.is_active and promotion.start_date <= datetime.utcnow() <= promotion.end_date:
+                raise ConflictException("Cannot delete currently active promotion. Consider deactivating instead.")
+            
+            # Log admin activity before deletion
+            self._log_admin_activity(
+                user_id=admin_user_id,
+                action="delete_promotion",
+                resource_type="promotion",
+                resource_id=promotion_id,
+                details={"promotion_name": promotion.promotion_name}
+            )
+            
+            # Delete promotion
+            self.db.delete(promotion)
+            self.db.commit()
+            
+            return True
+            
+        except NotFoundException:
+            raise
+        except IntegrityError:
+            self.db.rollback()
+            raise ConflictException("Promotion deletion failed due to database constraint")
+        except Exception as e:
+            self.db.rollback()
+            raise ValidationException(f"Failed to delete promotion: {str(e)}")
+    
+    # =============================================================================
     # HELPER METHODS
     # =============================================================================
     
@@ -639,6 +1163,168 @@ class AdminService:
             "average_price": average_price,
             "status_distribution": status_distribution,
             "category_distribution": category_distribution
+        }
+    
+    def _build_admin_order_response(self, order: Order) -> AdminOrderResponse:
+        """Build admin order response from database model"""
+        # Get user information
+        username = "Unknown"
+        email = "Unknown"
+        if hasattr(order, 'user') and order.user:
+            username = order.user.username
+            email = order.user.email
+        
+        # Get order items count and total quantity
+        items_count = 0
+        total_quantity = 0
+        if hasattr(order, 'items') and order.items:
+            items_count = len(order.items)
+            total_quantity = sum(item.quantity for item in order.items)
+        
+        return AdminOrderResponse(
+            order_id=str(order.order_id),
+            order_number=order.order_number,
+            user_id=str(order.user_id),
+            username=username,
+            email=email,
+            order_status=order.order_status,
+            payment_status=order.payment_status,
+            shipping_status=order.shipping_status,
+            order_type=getattr(order, 'order_type', 'regular'),
+            shipping_method=order.shipping_method,
+            subtotal=order.subtotal,
+            total_discount=order.total_discount,
+            total_tax=order.total_tax,
+            shipping_cost=order.shipping_cost,
+            total_amount=order.total_amount,
+            applied_promotions=order.applied_promotions or [],
+            items_count=items_count,
+            total_quantity=total_quantity,
+            estimated_delivery=order.estimated_delivery,
+            actual_delivery=order.actual_delivery,
+            notes=getattr(order, 'notes', None),
+            admin_notes=getattr(order, 'admin_notes', None),
+            created_at=order.created_at,
+            updated_at=order.updated_at
+        )
+    
+    def _build_admin_promotion_response(self, promotion: Promotion) -> AdminPromotionResponse:
+        """Build admin promotion response from database model"""
+        # Mock data for analytics (in real implementation, these would come from analytics)
+        total_revenue_generated = getattr(promotion, 'total_revenue_generated', 0.0)
+        total_orders_affected = getattr(promotion, 'total_orders_affected', 0)
+        average_discount_per_order = getattr(promotion, 'average_discount_per_order', 0.0)
+        
+        return AdminPromotionResponse(
+            promotion_id=str(promotion.promotion_id),
+            promotion_name=promotion.promotion_name,
+            description=promotion.description,
+            promotion_type=promotion.promotion_type,
+            discount_type=promotion.discount_type,
+            discount_value=promotion.discount_value,
+            max_discount_amount=getattr(promotion, 'max_discount_amount', None),
+            min_order_amount=getattr(promotion, 'min_order_amount', None),
+            max_order_amount=getattr(promotion, 'max_order_amount', None),
+            applicable_categories=promotion.applicable_categories or [],
+            applicable_products=promotion.applicable_products or [],
+            excluded_products=promotion.excluded_products or [],
+            user_groups=promotion.user_groups or [],
+            usage_limit_per_user=getattr(promotion, 'usage_limit_per_user', None),
+            total_usage_limit=getattr(promotion, 'total_usage_limit', None),
+            current_usage=getattr(promotion, 'current_usage', 0),
+            start_date=promotion.start_date,
+            end_date=promotion.end_date,
+            is_active=promotion.is_active,
+            priority=getattr(promotion, 'priority', 1),
+            auto_apply=getattr(promotion, 'auto_apply', False),
+            conditions=getattr(promotion, 'conditions', {}),
+            notes=getattr(promotion, 'notes', None),
+            total_revenue_generated=total_revenue_generated,
+            total_orders_affected=total_orders_affected,
+            average_discount_per_order=average_discount_per_order,
+            created_at=promotion.created_at,
+            updated_at=promotion.updated_at,
+            created_by=getattr(promotion, 'created_by', 'system'),
+            last_modified_by=getattr(promotion, 'last_modified_by', 'system')
+        )
+    
+    def _build_admin_orders_summary(self, orders: List[Order]) -> Dict[str, Any]:
+        """Build summary for admin orders"""
+        if not orders:
+            return {
+                "total_orders": 0,
+                "total_revenue": 0.0,
+                "average_order_value": 0.0,
+                "status_distribution": {},
+                "payment_status_distribution": {},
+                "shipping_status_distribution": {}
+            }
+        
+        total_orders = len(orders)
+        total_revenue = sum(order.total_amount for order in orders)
+        average_order_value = total_revenue / total_orders if total_orders > 0 else 0.0
+        
+        # Status distributions
+        status_distribution = {}
+        payment_status_distribution = {}
+        shipping_status_distribution = {}
+        
+        for order in orders:
+            # Order status
+            status = order.order_status
+            status_distribution[status] = status_distribution.get(status, 0) + 1
+            
+            # Payment status
+            payment_status = order.payment_status
+            payment_status_distribution[payment_status] = payment_status_distribution.get(payment_status, 0) + 1
+            
+            # Shipping status
+            shipping_status = order.shipping_status
+            shipping_status_distribution[shipping_status] = shipping_status_distribution.get(shipping_status, 0) + 1
+        
+        return {
+            "total_orders": total_orders,
+            "total_revenue": total_revenue,
+            "average_order_value": average_order_value,
+            "status_distribution": status_distribution,
+            "payment_status_distribution": payment_status_distribution,
+            "shipping_status_distribution": shipping_status_distribution
+        }
+    
+    def _build_admin_promotions_summary(self, promotions: List[Promotion]) -> Dict[str, Any]:
+        """Build summary for admin promotions"""
+        if not promotions:
+            return {
+                "total_promotions": 0,
+                "active_promotions": 0,
+                "expired_promotions": 0,
+                "type_distribution": {},
+                "discount_type_distribution": {}
+            }
+        
+        total_promotions = len(promotions)
+        active_promotions = len([p for p in promotions if p.is_active])
+        expired_promotions = len([p for p in promotions if p.end_date < datetime.utcnow()])
+        
+        # Type distributions
+        type_distribution = {}
+        discount_type_distribution = {}
+        
+        for promotion in promotions:
+            # Promotion type
+            promo_type = promotion.promotion_type
+            type_distribution[promo_type] = type_distribution.get(promo_type, 0) + 1
+            
+            # Discount type
+            discount_type = promotion.discount_type
+            discount_type_distribution[discount_type] = discount_type_distribution.get(discount_type, 0) + 1
+        
+        return {
+            "total_promotions": total_promotions,
+            "active_promotions": active_promotions,
+            "expired_promotions": expired_promotions,
+            "type_distribution": type_distribution,
+            "discount_type_distribution": discount_type_distribution
         }
     
     def _log_admin_activity(

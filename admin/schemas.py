@@ -319,3 +319,224 @@ class AdminProductUpdate(BaseModel):
     meta_data: Optional[Dict[str, Any]]
     notes: Optional[str]
     last_modified_by: str
+
+# =============================================================================
+# ADMIN ORDER MANAGEMENT SCHEMAS
+# =============================================================================
+
+class AdminOrderResponse(BaseModel):
+    """Response schema for admin order management"""
+    order_id: str = Field(..., description="Order unique identifier")
+    order_number: str = Field(..., description="Human-readable order number")
+    user_id: str = Field(..., description="User ID who placed the order")
+    username: str = Field(..., description="Username who placed the order")
+    email: str = Field(..., description="User email")
+    order_status: str = Field(..., description="Current order status")
+    payment_status: str = Field(..., description="Current payment status")
+    shipping_status: str = Field(..., description="Current shipping status")
+    order_type: str = Field(..., description="Type of order")
+    shipping_method: str = Field(..., description="Shipping method selected")
+    subtotal: float = Field(..., description="Order subtotal")
+    total_discount: float = Field(..., description="Total discount applied")
+    total_tax: float = Field(..., description="Total tax amount")
+    shipping_cost: float = Field(..., description="Shipping cost")
+    total_amount: float = Field(..., description="Final total amount")
+    applied_promotions: List[str] = Field(..., description="List of applied promotion IDs")
+    items_count: int = Field(..., description="Number of items in order")
+    total_quantity: int = Field(..., description="Total quantity of all items")
+    estimated_delivery: Optional[datetime] = Field(None, description="Estimated delivery date")
+    actual_delivery: Optional[datetime] = Field(None, description="Actual delivery date")
+    notes: Optional[str] = Field(None, description="Order notes")
+    admin_notes: Optional[str] = Field(None, description="Admin notes")
+    created_at: datetime = Field(..., description="When order was created")
+    updated_at: datetime = Field(..., description="When order was last updated")
+    
+    class Config:
+        from_attributes = True
+
+class AdminOrderListResponse(BaseModel):
+    """Response schema for admin order list"""
+    orders: List[AdminOrderResponse] = Field(..., description="List of orders")
+    total_count: int = Field(..., description="Total number of orders")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Page size")
+    total_pages: int = Field(..., description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there is a next page")
+    has_prev: bool = Field(..., description="Whether there is a previous page")
+    filters_applied: Dict[str, Any] = Field(..., description="Filters that were applied")
+    summary: Dict[str, Any] = Field(..., description="Summary of filtered results")
+
+class AdminOrderFilter(BaseModel):
+    """Filter schema for admin order management"""
+    search: Optional[str] = Field(None, description="Search in order number, username, email")
+    order_status: Optional[str] = Field(None, description="Filter by order status")
+    payment_status: Optional[str] = Field(None, description="Filter by payment status")
+    shipping_status: Optional[str] = Field(None, description="Filter by shipping status")
+    order_type: Optional[str] = Field(None, description="Filter by order type")
+    shipping_method: Optional[str] = Field(None, description="Filter by shipping method")
+    amount_min: Optional[float] = Field(None, ge=0, description="Minimum order amount")
+    amount_max: Optional[float] = Field(None, ge=0, description="Maximum order amount")
+    created_date_from: Optional[datetime] = Field(None, description="Created from date")
+    created_date_to: Optional[datetime] = Field(None, description="Created to date")
+    delivery_date_from: Optional[datetime] = Field(None, description="Delivery from date")
+    delivery_date_to: Optional[datetime] = Field(None, description="Delivery to date")
+    has_promotions: Optional[bool] = Field(None, description="Whether order has promotions")
+    sort_by: str = Field("created_at", description="Sort field")
+    sort_order: str = Field("desc", description="Sort order (asc/desc)")
+    page: int = Field(1, ge=1, description="Page number")
+    size: int = Field(20, ge=1, le=100, description="Page size")
+
+class AdminOrderStatusUpdate(BaseModel):
+    """Request schema for updating order status"""
+    order_status: str = Field(..., description="New order status")
+    payment_status: Optional[str] = Field(None, description="New payment status")
+    shipping_status: Optional[str] = Field(None, description="New shipping status")
+    admin_notes: Optional[str] = Field(None, description="Admin notes for the status change")
+    estimated_delivery: Optional[datetime] = Field(None, description="Updated estimated delivery date")
+    actual_delivery: Optional[datetime] = Field(None, description="Actual delivery date if delivered")
+
+class AdminOrderStats(BaseModel):
+    """Schema for admin order statistics"""
+    total_orders: int = Field(..., description="Total number of orders")
+    total_revenue: float = Field(..., description="Total revenue from orders")
+    monthly_revenue: float = Field(..., description="Monthly revenue")
+    average_order_value: float = Field(..., description="Average order value")
+    orders_by_status: Dict[str, int] = Field(..., description="Orders count by status")
+    orders_by_payment_status: Dict[str, int] = Field(..., description="Orders count by payment status")
+    orders_by_shipping_status: Dict[str, int] = Field(..., description="Orders count by shipping status")
+    orders_by_month: List[Dict[str, Any]] = Field(..., description="Orders by month")
+    top_products: List[Dict[str, Any]] = Field(..., description="Top selling products")
+    top_categories: List[Dict[str, Any]] = Field(..., description="Top selling categories")
+    delivery_performance: Dict[str, Any] = Field(..., description="Delivery performance metrics")
+
+# =============================================================================
+# ADMIN PROMOTION MANAGEMENT SCHEMAS
+# =============================================================================
+
+class AdminPromotionCreateRequest(BaseModel):
+    """Request schema for creating promotions (admin)"""
+    promotion_name: str = Field(..., min_length=1, max_length=255, description="Promotion name")
+    description: str = Field(..., min_length=10, description="Promotion description")
+    promotion_type: str = Field(..., description="Type of promotion")
+    discount_type: str = Field(..., description="Type of discount")
+    discount_value: float = Field(..., gt=0, description="Discount value")
+    max_discount_amount: Optional[float] = Field(None, ge=0, description="Maximum discount amount")
+    min_order_amount: Optional[float] = Field(None, ge=0, description="Minimum order amount required")
+    max_order_amount: Optional[float] = Field(None, ge=0, description="Maximum order amount allowed")
+    applicable_categories: List[str] = Field(default_factory=list, description="Categories this promotion applies to")
+    applicable_products: List[str] = Field(default_factory=list, description="Specific products this promotion applies to")
+    excluded_products: List[str] = Field(default_factory=list, description="Products excluded from this promotion")
+    user_groups: List[str] = Field(default_factory=list, description="User groups eligible for this promotion")
+    usage_limit_per_user: Optional[int] = Field(None, ge=1, description="Usage limit per user")
+    total_usage_limit: Optional[int] = Field(None, ge=1, description="Total usage limit")
+    current_usage: int = Field(0, ge=0, description="Current usage count")
+    start_date: datetime = Field(..., description="Promotion start date")
+    end_date: datetime = Field(..., description="Promotion end date")
+    is_active: bool = Field(True, description="Whether promotion is active")
+    priority: int = Field(1, ge=1, le=100, description="Promotion priority (1-100)")
+    auto_apply: bool = Field(False, description="Whether promotion auto-applies to eligible orders")
+    conditions: Dict[str, Any] = Field(default_factory=dict, description="Additional conditions")
+    notes: Optional[str] = Field(None, description="Admin notes")
+    
+    @validator('end_date')
+    def validate_end_date(cls, v, values):
+        if 'start_date' in values and v <= values['start_date']:
+            raise ValueError('End date must be after start date')
+        return v
+    
+    @validator('discount_value')
+    def validate_discount_value(cls, v, values):
+        if 'discount_type' in values:
+            if values['discount_type'] == 'percentage' and v > 100:
+                raise ValueError('Percentage discount cannot exceed 100%')
+        return v
+
+class AdminPromotionUpdateRequest(BaseModel):
+    """Request schema for updating promotions (admin)"""
+    promotion_name: Optional[str] = Field(None, min_length=1, max_length=255, description="Promotion name")
+    description: Optional[str] = Field(None, min_length=10, description="Promotion description")
+    promotion_type: Optional[str] = Field(None, description="Type of promotion")
+    discount_type: Optional[str] = Field(None, description="Type of discount")
+    discount_value: Optional[float] = Field(None, gt=0, description="Discount value")
+    max_discount_amount: Optional[float] = Field(None, ge=0, description="Maximum discount amount")
+    min_order_amount: Optional[float] = Field(None, ge=0, description="Minimum order amount required")
+    max_order_amount: Optional[float] = Field(None, ge=0, description="Maximum order amount allowed")
+    applicable_categories: Optional[List[str]] = Field(None, description="Categories this promotion applies to")
+    applicable_products: Optional[List[str]] = Field(None, description="Specific products this promotion applies to")
+    excluded_products: Optional[List[str]] = Field(None, description="Products excluded from this promotion")
+    user_groups: Optional[List[str]] = Field(None, description="User groups eligible for this promotion")
+    usage_limit_per_user: Optional[int] = Field(None, ge=1, description="Usage limit per user")
+    total_usage_limit: Optional[int] = Field(None, ge=1, description="Total usage limit")
+    start_date: Optional[datetime] = Field(None, description="Promotion start date")
+    end_date: Optional[datetime] = Field(None, description="Promotion end date")
+    is_active: Optional[bool] = Field(None, description="Whether promotion is active")
+    priority: Optional[int] = Field(None, ge=1, le=100, description="Promotion priority (1-100)")
+    auto_apply: Optional[bool] = Field(None, description="Whether promotion auto-applies to eligible orders")
+    conditions: Optional[Dict[str, Any]] = Field(None, description="Additional conditions")
+    notes: Optional[str] = Field(None, description="Admin notes")
+
+class AdminPromotionResponse(BaseModel):
+    """Response schema for admin promotion management"""
+    promotion_id: str = Field(..., description="Promotion unique identifier")
+    promotion_name: str = Field(..., description="Promotion name")
+    description: str = Field(..., description="Promotion description")
+    promotion_type: str = Field(..., description="Type of promotion")
+    discount_type: str = Field(..., description="Type of discount")
+    discount_value: float = Field(..., description="Discount value")
+    max_discount_amount: Optional[float] = Field(None, description="Maximum discount amount")
+    min_order_amount: Optional[float] = Field(None, description="Minimum order amount required")
+    max_order_amount: Optional[float] = Field(None, description="Maximum order amount allowed")
+    applicable_categories: List[str] = Field(..., description="Categories this promotion applies to")
+    applicable_products: List[str] = Field(..., description="Specific products this promotion applies to")
+    excluded_products: List[str] = Field(..., description="Products excluded from this promotion")
+    user_groups: List[str] = Field(..., description="User groups eligible for this promotion")
+    usage_limit_per_user: Optional[int] = Field(None, description="Usage limit per user")
+    total_usage_limit: Optional[int] = Field(None, description="Total usage limit")
+    current_usage: int = Field(..., description="Current usage count")
+    start_date: datetime = Field(..., description="Promotion start date")
+    end_date: datetime = Field(..., description="Promotion end date")
+    is_active: bool = Field(..., description="Whether promotion is active")
+    priority: int = Field(..., description="Promotion priority")
+    auto_apply: bool = Field(..., description="Whether promotion auto-applies")
+    conditions: Dict[str, Any] = Field(..., description="Additional conditions")
+    notes: Optional[str] = Field(None, description="Admin notes")
+    total_revenue_generated: float = Field(..., description="Total revenue generated through this promotion")
+    total_orders_affected: int = Field(..., description="Total orders affected by this promotion")
+    average_discount_per_order: float = Field(..., description="Average discount per order")
+    created_at: datetime = Field(..., description="When promotion was created")
+    updated_at: datetime = Field(..., description="When promotion was last updated")
+    created_by: str = Field(..., description="User ID who created the promotion")
+    last_modified_by: str = Field(..., description="User ID who last modified the promotion")
+    
+    class Config:
+        from_attributes = True
+
+class AdminPromotionListResponse(BaseModel):
+    """Response schema for admin promotion list"""
+    promotions: List[AdminPromotionResponse] = Field(..., description="List of promotions")
+    total_count: int = Field(..., description="Total number of promotions")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Page size")
+    total_pages: int = Field(..., description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there is a next page")
+    has_prev: bool = Field(..., description="Whether there is a previous page")
+    filters_applied: Dict[str, Any] = Field(..., description="Filters that were applied")
+    summary: Dict[str, Any] = Field(..., description="Summary of filtered results")
+
+class AdminPromotionFilter(BaseModel):
+    """Filter schema for admin promotion management"""
+    search: Optional[str] = Field(None, description="Search in promotion name, description")
+    promotion_type: Optional[str] = Field(None, description="Filter by promotion type")
+    discount_type: Optional[str] = Field(None, description="Filter by discount type")
+    is_active: Optional[bool] = Field(None, description="Filter by active status")
+    auto_apply: Optional[bool] = Field(None, description="Filter by auto-apply status")
+    start_date_from: Optional[datetime] = Field(None, description="Start date from")
+    start_date_to: Optional[datetime] = Field(None, description="Start date to")
+    end_date_from: Optional[datetime] = Field(None, description="End date from")
+    end_date_to: Optional[datetime] = Field(None, description="End date to")
+    min_discount_value: Optional[float] = Field(None, ge=0, description="Minimum discount value")
+    max_discount_value: Optional[float] = Field(None, ge=0, description="Maximum discount value")
+    sort_by: str = Field("created_at", description="Sort field")
+    sort_order: str = Field("desc", description="Sort order (asc/desc)")
+    page: int = Field(1, ge=1, description="Page number")
+    size: int = Field(20, ge=1, le=100, description="Page size")
