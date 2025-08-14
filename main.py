@@ -5,6 +5,7 @@ Provides REST API endpoints for products, categories, and core functionality.
 
 import uuid
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -41,7 +42,8 @@ app = FastAPI(
     license_info={
         "name": "MIT License",
         "url": "https://opensource.org/licenses/MIT"
-    }
+    },
+    lifespan=lifespan
 )
 
 # Add CORS middleware for frontend integration
@@ -55,15 +57,15 @@ app.add_middleware(
 
 
 # ========================================
-# STARTUP EVENT HANDLER
+# LIFESPAN MANAGER
 # ========================================
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Startup event handler that runs when the application starts.
-    Creates database tables and performs health checks.
+    Lifespan manager for startup and shutdown events.
     """
+    # Startup
     try:
         # Create database tables if they don't exist
         create_tables()
@@ -77,6 +79,11 @@ async def startup_event():
             
     except Exception as e:
         print(f"❌ Startup error: {str(e)}")
+    
+    yield
+    
+    # Shutdown
+    print("🔄 Shutting down Labanita API...")
 
 
 # ========================================

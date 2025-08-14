@@ -142,7 +142,7 @@ class ProductBase(BaseModel):
     product_name: str = Field(..., min_length=1, max_length=255)
     product_slug: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    base_price: Decimal = Field(..., ge=0, decimal_places=2)
+    base_price: Decimal = Field(..., ge=0)
     image_url: Optional[str] = Field(None, max_length=500)
     sort_order: int = Field(0, ge=0)
     is_featured: bool = False
@@ -161,7 +161,7 @@ class ProductUpdate(BaseModel):
     product_name: Optional[str] = Field(None, min_length=1, max_length=255)
     product_slug: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
-    base_price: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    base_price: Optional[Decimal] = Field(None, ge=0)
     image_url: Optional[str] = Field(None, max_length=500)
     sort_order: Optional[int] = Field(None, ge=0)
     is_featured: Optional[bool] = None
@@ -291,9 +291,9 @@ class PromotionBase(BaseModel):
     promotion_name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     discount_type: DiscountTypeEnum
-    discount_value: Decimal = Field(..., gt=0, decimal_places=2)
-    minimum_order_amount: Decimal = Field(0, ge=0, decimal_places=2)
-    maximum_discount_amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    discount_value: Decimal = Field(..., gt=0)
+    minimum_order_amount: Decimal = Field(0, ge=0)
+    maximum_discount_amount: Optional[Decimal] = Field(None, gt=0)
     usage_limit: Optional[int] = Field(None, gt=0)
     start_date: datetime
     end_date: datetime
@@ -317,9 +317,9 @@ class PromotionUpdate(BaseModel):
     promotion_name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     discount_type: Optional[DiscountTypeEnum] = None
-    discount_value: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
-    minimum_order_amount: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
-    maximum_discount_amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    discount_value: Optional[Decimal] = Field(None, gt=0)
+    minimum_order_amount: Optional[Decimal] = Field(None, ge=0)
+    maximum_discount_amount: Optional[Decimal] = Field(None, gt=0)
     usage_limit: Optional[int] = Field(None, gt=0)
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -343,8 +343,8 @@ class PromotionResponse(PromotionBase, TimestampBase):
 class OrderItemBase(BaseModel):
     """Base order item schema with common fields."""
     quantity: int = Field(..., gt=0)
-    unit_price: Decimal = Field(..., ge=0, decimal_places=2)
-    total_price: Decimal = Field(..., ge=0, decimal_places=2)
+    unit_price: Decimal = Field(..., ge=0)
+    total_price: Decimal = Field(..., ge=0)
 
 
 class OrderItemCreate(OrderItemBase):
@@ -372,12 +372,12 @@ class OrderBase(BaseModel):
     """Base order schema with common fields."""
     order_number: str = Field(..., min_length=1, max_length=50)
     order_status: OrderStatusEnum = OrderStatusEnum.PENDING
-    subtotal: Decimal = Field(..., ge=0, decimal_places=2)
-    delivery_fee: Decimal = Field(..., ge=0, decimal_places=2)
-    discount_amount: Decimal = Field(0, ge=0, decimal_places=2)
+    subtotal: Decimal = Field(..., ge=0)
+    delivery_fee: Decimal = Field(..., ge=0)
+    discount_amount: Decimal = Field(0, ge=0)
     points_used: int = Field(0, ge=0)
     points_earned: int = Field(0, ge=0)
-    total_amount: Decimal = Field(..., ge=0, decimal_places=2)
+    total_amount: Decimal = Field(..., ge=0)
     order_notes: Optional[str] = None
     estimated_delivery_time: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
@@ -490,9 +490,9 @@ class ProductOfferBase(BaseModel):
     """Base product offer schema with common fields."""
     offer_name: str = Field(..., min_length=1, max_length=255)
     discount_type: DiscountTypeEnum
-    discount_value: Decimal = Field(..., gt=0, decimal_places=2)
-    original_price: Decimal = Field(..., gt=0, decimal_places=2)
-    sale_price: Decimal = Field(..., gt=0, decimal_places=2)
+    discount_value: Decimal = Field(..., gt=0)
+    original_price: Decimal = Field(..., gt=0)
+    sale_price: Decimal = Field(..., gt=0)
     start_date: datetime
     end_date: datetime
     is_active: bool = True
@@ -519,9 +519,9 @@ class ProductOfferUpdate(BaseModel):
     """Schema for updating product offer information."""
     offer_name: Optional[str] = Field(None, min_length=1, max_length=255)
     discount_type: Optional[DiscountTypeEnum] = None
-    discount_value: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
-    original_price: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
-    sale_price: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    discount_value: Optional[Decimal] = Field(None, gt=0)
+    original_price: Optional[Decimal] = Field(None, gt=0)
+    sale_price: Optional[Decimal] = Field(None, gt=0)
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
