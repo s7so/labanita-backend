@@ -22,6 +22,7 @@ from products.routes import router as product_router
 from offers.routes import router as offer_router
 from cart.routes import router as cart_router
 from promotions.routes import router as promotion_router
+from orders.routes import router as order_router
 
 # =============================================================================
 # LIFESPAN EVENTS
@@ -118,6 +119,9 @@ app.include_router(cart_router, prefix="/api")
 # Promotion management routes
 app.include_router(promotion_router, prefix="/api")
 
+# Order management routes
+app.include_router(order_router, prefix="/api")
+
 # =============================================================================
 # ROOT ENDPOINT
 # =============================================================================
@@ -206,7 +210,8 @@ async def detailed_health_check(db: Session = Depends(get_db)):
                     "product_management": "running",
                     "offer_management": "running",
                     "cart_management": "running",
-                    "promotion_management": "running"
+                    "promotion_management": "running",
+                    "order_management": "running"
                 }
             },
             message="Detailed health check completed"
@@ -402,5 +407,6 @@ if __name__ == "__main__":
     print("🎁 Offer management available at /api/offers")
     print("🛒 Cart management available at /api/cart")
     print("🎉 Promotion management available at /api/promotions")
+    print("📦 Order management available at /api/orders")
     print("👤 User management available at /api/user")
     print("🔐 Authentication available at /api/auth")
