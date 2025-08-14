@@ -15,7 +15,8 @@ from orders.schemas import (
     OrderResponse, OrderListResponse, OrderStatusResponse, OrderTrackingResponse,
     OrderCalculationResponse, OrderCreateResponse, OrderCreate, OrderUpdate,
     OrderItemCreate, OrderFilter, PaginationParams, PaginatedOrdersResponse,
-    OrderStatsResponse, OrderAnalyticsResponse
+    OrderStatsResponse, OrderAnalyticsResponse, OrderHistoryFilter, OrderHistoryResponse,
+    OrderHistoryItem, OrderHistorySummary
 )
 
 class OrderService:
@@ -577,6 +578,191 @@ class OrderService:
             raise ValidationException(f"Failed to reorder: {str(e)}")
     
     # =============================================================================
+    # ORDER HISTORY MANAGEMENT
+    # =============================================================================
+    
+    def get_order_history(
+        self,
+        user_id: str,
+        filters: Optional[OrderHistoryFilter] = None
+    ) -> OrderHistoryResponse:
+        """Get order history for a user with filtering and pagination"""
+        try:
+            query = self.db.query(Order).filter(Order.user_id == user_id)
+            
+            # Apply filters
+            if filters:
+                if filters.status:
+                    query = query.filter(Order.order_status == filters.status)
+                
+                if filters.date_from:
+                    query = query.filter(Order.created_at >= filters.date_from)
+                
+                if filters.date_to:
+                    query = query.filter(Order.created_at <= filters.date_to)
+                
+                if filters.min_amount:
+                    query = query.filter(Order.total_amount >= filters.min_amount)
+                
+                if filters.max_amount:
+                    query = query.filter(Order.total_amount <= filters.max_amount)
+                
+                if filters.shipping_method:
+                    query = query.filter(Order.shipping_method == filters.shipping_method)
+                
+                if filters.has_promotions is not None:
+                    if filters.has_promotions:
+                        query = query.filter(Order.applied_promotions != [])
+                    else:
+                        query = query.filter(Order.applied_promotions == [])
+                
+                if filters.search:
+                    search_term = f"%{filters.search}%"
+                    query = query.filter(
+                        or_(
+                            Order.order_number.ilike(search_term),
+                            Order.notes.ilike(search_term)
+                        )
+                    )
+            
+            # Get total count
+            total = query.count()
+            
+            # Apply sorting
+            if filters and filters.sort_by:
+                sort_field = getattr(Order, filters.sort_by, Order.created_at)
+                if filters.sort_order == "asc":
+                    query = query.order_by(asc(sort_field))
+                else:
+                    query = query.order_by(desc(sort_field))
+            else:
+                query = query.order_by(desc(Order.created_at))
+            
+            # Apply pagination
+            page = filters.page if filters else 1
+            size = filters.size if filters else 20
+            orders = query.offset((page - 1) * size).limit(size).all()
+            
+            # Build history items
+            history_items = []
+            for order in orders:
+                history_items.append(self._build_order_history_item(order))
+            
+            # Calculate pagination info
+            total_pages = (total + size - 1) // size
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            # Build filters applied
+            filters_applied = {}
+            if filters:
+                if filters.status:
+                    filters_applied["status"] = filters.status
+                if filters.date_from:
+                    filters_applied["date_from"] = filters.date_from.isoformat()
+                if filters.date_to:
+                    filters_applied["date_to"] = filters.date_to.isoformat()
+                if filters.min_amount:
+                    filters_applied["min_amount"] = filters.min_amount
+                if filters.max_amount:
+                    filters_applied["max_amount"] = filters.max_amount
+                if filters.shipping_method:
+                    filters_applied["shipping_method"] = filters.shipping_method
+                if filters.has_promotions is not None:
+                    filters_applied["has_promotions"] = filters.has_promotions
+                if filters.search:
+                    filters_applied["search"] = filters.search
+            
+            # Build summary
+            summary = self._build_order_history_summary(orders)
+            
+            return OrderHistoryResponse(
+                orders=history_items,
+                total_count=total,
+                page=page,
+                size=size,
+                total_pages=total_pages,
+                has_next=has_next,
+                has_prev=has_prev,
+                filters_applied=filters_applied,
+                summary=summary
+            )
+            
+        except Exception as e:
+            raise ValidationException(f"Failed to get order history: {str(e)}")
+    
+    def get_order_history_summary(
+        self,
+        user_id: str,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None
+    ) -> OrderHistorySummary:
+        """Get summary statistics for user's order history"""
+        try:
+            query = self.db.query(Order).filter(Order.user_id == user_id)
+            
+            # Apply date filters if provided
+            if date_from:
+                query = query.filter(Order.created_at >= date_from)
+            if date_to:
+                query = query.filter(Order.created_at <= date_to)
+            
+            orders = query.all()
+            
+            if not orders:
+                return OrderHistorySummary(
+                    total_orders=0,
+                    total_revenue=0.0,
+                    average_order_value=0.0,
+                    orders_by_status={},
+                    orders_by_month=[],
+                    total_savings=0.0,
+                    most_used_shipping_method="none",
+                    delivery_success_rate=0.0
+                )
+            
+            # Calculate basic statistics
+            total_orders = len(orders)
+            total_revenue = sum(order.total_amount for order in orders)
+            average_order_value = total_revenue / total_orders if total_orders > 0 else 0.0
+            total_savings = sum(order.total_savings for order in orders)
+            
+            # Calculate orders by status
+            orders_by_status = {}
+            for order in orders:
+                status = order.order_status
+                orders_by_status[status] = orders_by_status.get(status, 0) + 1
+            
+            # Calculate orders by month
+            orders_by_month = self._calculate_orders_by_month(orders)
+            
+            # Calculate most used shipping method
+            shipping_methods = {}
+            for order in orders:
+                method = order.shipping_method
+                shipping_methods[method] = shipping_methods.get(method, 0) + 1
+            
+            most_used_shipping_method = max(shipping_methods.items(), key=lambda x: x[1])[0] if shipping_methods else "none"
+            
+            # Calculate delivery success rate
+            successful_deliveries = len([o for o in orders if o.order_status == "delivered"])
+            delivery_success_rate = (successful_deliveries / total_orders * 100) if total_orders > 0 else 0.0
+            
+            return OrderHistorySummary(
+                total_orders=total_orders,
+                total_revenue=total_revenue,
+                average_order_value=average_order_value,
+                orders_by_status=orders_by_status,
+                orders_by_month=orders_by_month,
+                total_savings=total_savings,
+                most_used_shipping_method=most_used_shipping_method,
+                delivery_success_rate=delivery_success_rate
+            )
+            
+        except Exception as e:
+            raise ValidationException(f"Failed to get order history summary: {str(e)}")
+    
+    # =============================================================================
     # HELPER METHODS
     # =============================================================================
     
@@ -653,6 +839,89 @@ class OrderService:
             tags=order.tags or [],
             priority=order.priority
         )
+    
+    def _build_order_history_item(self, order: Order) -> OrderHistoryItem:
+        """Build order history item from database model"""
+        return OrderHistoryItem(
+            order_id=str(order.order_id),
+            order_number=order.order_number,
+            order_status=order.order_status,
+            payment_status=order.payment_status,
+            shipping_status=order.shipping_status,
+            total_amount=order.total_amount,
+            total_items=len(order.items) if hasattr(order, 'items') else 0,
+            total_quantity=sum(item.quantity for item in order.items) if hasattr(order, 'items') else 0,
+            shipping_method=order.shipping_method,
+            applied_promotions=order.applied_promotions or [],
+            total_savings=order.total_savings,
+            estimated_delivery=order.estimated_delivery,
+            actual_delivery=order.actual_delivery,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+            cancelled_at=order.cancelled_at
+        )
+    
+    def _build_order_history_summary(self, orders: List[Order]) -> Dict[str, Any]:
+        """Build summary for order history"""
+        if not orders:
+            return {
+                "total_orders": 0,
+                "total_revenue": 0.0,
+                "average_order_value": 0.0,
+                "total_savings": 0.0,
+                "status_distribution": {},
+                "shipping_methods": {}
+            }
+        
+        total_orders = len(orders)
+        total_revenue = sum(order.total_amount for order in orders)
+        average_order_value = total_revenue / total_orders
+        total_savings = sum(order.total_savings for order in orders)
+        
+        # Status distribution
+        status_distribution = {}
+        for order in orders:
+            status = order.order_status
+            status_distribution[status] = status_distribution.get(status, 0) + 1
+        
+        # Shipping methods
+        shipping_methods = {}
+        for order in orders:
+            method = order.shipping_method
+            shipping_methods[method] = shipping_methods.get(method, 0) + 1
+        
+        return {
+            "total_orders": total_orders,
+            "total_revenue": total_revenue,
+            "average_order_value": average_order_value,
+            "total_savings": total_savings,
+            "status_distribution": status_distribution,
+            "shipping_methods": shipping_methods
+        }
+    
+    def _calculate_orders_by_month(self, orders: List[Order]) -> List[Dict[str, Any]]:
+        """Calculate orders grouped by month"""
+        monthly_orders = {}
+        
+        for order in orders:
+            month_key = order.created_at.strftime("%Y-%m")
+            if month_key not in monthly_orders:
+                monthly_orders[month_key] = {
+                    "month": month_key,
+                    "count": 0,
+                    "revenue": 0.0,
+                    "savings": 0.0
+                }
+            
+            monthly_orders[month_key]["count"] += 1
+            monthly_orders[month_key]["revenue"] += order.total_amount
+            monthly_orders[month_key]["savings"] += order.total_savings
+        
+        # Convert to list and sort by month
+        result = list(monthly_orders.values())
+        result.sort(key=lambda x: x["month"], reverse=True)
+        
+        return result
     
     def _calculate_shipping_cost(
         self,

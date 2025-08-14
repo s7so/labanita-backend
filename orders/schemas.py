@@ -414,3 +414,67 @@ class OrderNotificationResponse(BaseModel):
     sent_at: Optional[datetime] = Field(None, description="When notification was sent")
     is_read: bool = Field(..., description="Whether notification has been read")
     status: str = Field(..., description="Notification status")
+
+# =============================================================================
+# ORDER HISTORY SCHEMAS
+# =============================================================================
+
+class OrderHistoryFilter(BaseModel):
+    """Schema for filtering order history"""
+    status: Optional[OrderStatus] = Field(None, description="Filter by order status")
+    date_from: Optional[datetime] = Field(None, description="Orders from date")
+    date_to: Optional[datetime] = Field(None, description="Orders to date")
+    min_amount: Optional[float] = Field(None, ge=0, description="Minimum order amount")
+    max_amount: Optional[float] = Field(None, ge=0, description="Maximum order amount")
+    shipping_method: Optional[ShippingMethod] = Field(None, description="Filter by shipping method")
+    has_promotions: Optional[bool] = Field(None, description="Whether order has promotions")
+    search: Optional[str] = Field(None, description="Search in order number, product names")
+    sort_by: str = Field("created_at", description="Sort field")
+    sort_order: str = Field("desc", description="Sort order (asc/desc)")
+    page: int = Field(1, ge=1, description="Page number")
+    size: int = Field(20, ge=1, le=100, description="Page size")
+
+class OrderHistoryItem(BaseModel):
+    """Schema for order history item"""
+    order_id: str = Field(..., description="Order unique identifier")
+    order_number: str = Field(..., description="Human-readable order number")
+    order_status: OrderStatus = Field(..., description="Current order status")
+    payment_status: PaymentStatus = Field(..., description="Current payment status")
+    shipping_status: ShippingStatus = Field(..., description="Current shipping status")
+    total_amount: float = Field(..., description="Final total amount")
+    total_items: int = Field(..., description="Total number of items")
+    total_quantity: int = Field(..., description="Total quantity of all items")
+    shipping_method: ShippingMethod = Field(..., description="Shipping method selected")
+    applied_promotions: List[str] = Field(..., description="List of applied promotion IDs")
+    total_savings: float = Field(..., description="Total amount saved through promotions")
+    estimated_delivery: Optional[datetime] = Field(None, description="Estimated delivery date")
+    actual_delivery: Optional[datetime] = Field(None, description="Actual delivery date")
+    created_at: datetime = Field(..., description="When order was created")
+    updated_at: datetime = Field(..., description="When order was last updated")
+    cancelled_at: Optional[datetime] = Field(None, description="When order was cancelled")
+    
+    class Config:
+        from_attributes = True
+
+class OrderHistoryResponse(BaseModel):
+    """Response schema for order history"""
+    orders: List[OrderHistoryItem] = Field(..., description="List of orders in history")
+    total_count: int = Field(..., description="Total number of orders")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Page size")
+    total_pages: int = Field(..., description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there is a next page")
+    has_prev: bool = Field(..., description="Whether there is a previous page")
+    filters_applied: Dict[str, Any] = Field(..., description="Filters that were applied")
+    summary: Dict[str, Any] = Field(..., description="Summary of filtered results")
+
+class OrderHistorySummary(BaseModel):
+    """Schema for order history summary"""
+    total_orders: int = Field(..., description="Total number of orders")
+    total_revenue: float = Field(..., description="Total revenue from orders")
+    average_order_value: float = Field(..., description="Average order value")
+    orders_by_status: Dict[str, int] = Field(..., description="Orders count by status")
+    orders_by_month: List[Dict[str, Any]] = Field(..., description="Orders by month")
+    total_savings: float = Field(..., description="Total savings from promotions")
+    most_used_shipping_method: str = Field(..., description="Most frequently used shipping method")
+    delivery_success_rate: float = Field(..., description="Percentage of successful deliveries")

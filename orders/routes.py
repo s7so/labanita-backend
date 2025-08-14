@@ -14,7 +14,8 @@ from orders.schemas import (
     OrderCalculationResponse, OrderCreateResponse, OrderListResponse,
     OrderResponse, OrderStatusResponse, OrderTrackingResponse,
     OrderCalculationRequest, OrderCreateRequest, OrderCancelRequest,
-    OrderReorderRequest
+    OrderReorderRequest, OrderHistoryResponse, OrderHistoryFilter,
+    OrderHistorySummary
 )
 from orders.services import OrderService
 
@@ -626,6 +627,207 @@ async def get_order_statistics(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get order statistics")
 
 # =============================================================================
+# ORDER HISTORY ENDPOINTS
+# =============================================================================
+
+@router.get("/history", response_model=OrderHistoryResponse)
+async def get_order_history(
+    user_id: str = Query(..., description="User ID to get order history for"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get complete order history for a user
+    
+    Returns comprehensive order history including:
+    - All orders with basic information
+    - Pagination support
+    - Basic summary statistics
+    - Order status distribution
+    
+    The system will:
+    - Retrieve all orders for the specified user
+    - Apply pagination
+    - Calculate summary statistics
+    - Return formatted history items
+    """
+    try:
+        order_service = OrderService(db)
+        
+        # Validate user_id
+        if not user_id:
+            raise ValidationException("User ID is required")
+        
+        # Create basic filter for pagination only
+        from orders.schemas import OrderHistoryFilter
+        filters = OrderHistoryFilter(
+            page=page,
+            size=size
+        )
+        
+        # Get order history
+        history = order_service.get_order_history(user_id, filters)
+        
+        return history
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get order history")
+
+@router.get("/history/filter", response_model=OrderHistoryResponse)
+async def get_filtered_order_history(
+    user_id: str = Query(..., description="User ID to get order history for"),
+    status: Optional[str] = Query(None, description="Filter by order status"),
+    date_from: Optional[str] = Query(None, description="Orders from date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Orders to date (YYYY-MM-DD)"),
+    min_amount: Optional[float] = Query(None, ge=0, description="Minimum order amount"),
+    max_amount: Optional[float] = Query(None, ge=0, description="Maximum order amount"),
+    shipping_method: Optional[str] = Query(None, description="Filter by shipping method"),
+    has_promotions: Optional[bool] = Query(None, description="Whether order has promotions"),
+    search: Optional[str] = Query(None, description="Search in order number, product names"),
+    sort_by: str = Query("created_at", description="Sort field"),
+    sort_order: str = Query("desc", description="Sort order (asc/desc)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get filtered order history for a user
+    
+    Returns filtered order history with comprehensive filtering:
+    - Filter by status, dates, amounts, shipping method
+    - Search in order numbers and notes
+    - Sort by various fields
+    - Pagination support
+    - Detailed summary statistics
+    
+    The system will:
+    - Apply all specified filters
+    - Perform search across order fields
+    - Sort results as requested
+    - Apply pagination
+    - Calculate filtered summary statistics
+    - Return filtered history with metadata
+    """
+    try:
+        order_service = OrderService(db)
+        
+        # Validate user_id
+        if not user_id:
+            raise ValidationException("User ID is required")
+        
+        # Parse date filters
+        parsed_date_from = None
+        parsed_date_to = None
+        
+        if date_from:
+            try:
+                parsed_date_from = datetime.fromisoformat(date_from)
+            except ValueError:
+                raise ValidationException("Invalid date_from format. Use YYYY-MM-DD")
+        
+        if date_to:
+            try:
+                parsed_date_to = datetime.fromisoformat(date_to)
+            except ValueError:
+                raise ValidationException("Invalid date_to format. Use YYYY-MM-DD")
+        
+        # Validate amount filters
+        if min_amount is not None and max_amount is not None:
+            if min_amount > max_amount:
+                raise ValidationException("min_amount cannot be greater than max_amount")
+        
+        # Create filter object
+        filters = OrderHistoryFilter(
+            status=status,
+            date_from=parsed_date_from,
+            date_to=parsed_date_to,
+            min_amount=min_amount,
+            max_amount=max_amount,
+            shipping_method=shipping_method,
+            has_promotions=has_promotions,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            size=size
+        )
+        
+        # Get filtered order history
+        history = order_service.get_order_history(user_id, filters)
+        
+        return history
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get filtered order history")
+
+@router.get("/history/summary", response_model=OrderHistorySummary)
+async def get_order_history_summary(
+    user_id: str = Query(..., description="User ID to get summary for"),
+    date_from: Optional[str] = Query(None, description="Summary from date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Summary to date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get summary statistics for user's order history
+    
+    Returns comprehensive summary including:
+    - Total orders and revenue
+    - Average order values
+    - Status distribution
+    - Monthly breakdown
+    - Shipping method preferences
+    - Delivery success rates
+    
+    The system will:
+    - Calculate overall statistics
+    - Group orders by month
+    - Analyze shipping preferences
+    - Calculate success rates
+    - Provide actionable insights
+    """
+    try:
+        order_service = OrderService(db)
+        
+        # Validate user_id
+        if not user_id:
+            raise ValidationException("User ID is required")
+        
+        # Parse date filters
+        parsed_date_from = None
+        parsed_date_to = None
+        
+        if date_from:
+            try:
+                parsed_date_from = datetime.fromisoformat(date_from)
+            except ValueError:
+                raise ValidationException("Invalid date_from format. Use YYYY-MM-DD")
+        
+        if date_to:
+            try:
+                parsed_date_to = datetime.fromisoformat(date_to)
+            except ValueError:
+                raise ValidationException("Invalid date_to format. Use YYYY-MM-DD")
+        
+        # Get order history summary
+        summary = order_service.get_order_history_summary(
+            user_id=user_id,
+            date_from=parsed_date_from,
+            date_to=parsed_date_to
+        )
+        
+        return summary
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get order history summary")
+
+# =============================================================================
 # HEALTH CHECK ENDPOINT
 # =============================================================================
 
@@ -652,7 +854,10 @@ async def order_service_health_check():
                 "GET /api/orders/{order_id}/summary",
                 "GET /api/orders/{order_id}/invoice",
                 "GET /api/orders/analytics/overview",
-                "GET /api/orders/statistics/summary"
+                "GET /api/orders/statistics/summary",
+                "GET /api/orders/history",
+                "GET /api/orders/history/filter",
+                "GET /api/orders/history/summary"
             ],
             "features": [
                 "Complete order management",
@@ -666,7 +871,10 @@ async def order_service_health_check():
                 "Order analytics and statistics",
                 "Invoice generation",
                 "Shipping and tax calculations",
-                "Promotion integration"
+                "Promotion integration",
+                "Order history management",
+                "Advanced history filtering",
+                "History summary and analytics"
             ]
         },
         message="Order service is running"

@@ -16,7 +16,11 @@ from .schemas import (
     PaginationParams,
     PaginatedOrdersResponse,
     OrderStatsResponse,
-    OrderAnalyticsResponse
+    OrderAnalyticsResponse,
+    OrderHistoryFilter,
+    OrderHistoryResponse,
+    OrderHistoryItem,
+    OrderHistorySummary
 )
 
 from .services import OrderService
@@ -39,6 +43,10 @@ __all__ = [
     "PaginatedOrdersResponse",
     "OrderStatsResponse",
     "OrderAnalyticsResponse",
+    "OrderHistoryFilter",
+    "OrderHistoryResponse",
+    "OrderHistoryItem",
+    "OrderHistorySummary",
     
     # Services
     "OrderService",
