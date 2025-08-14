@@ -9,8 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from database import get_db, create_tables, check_database_connection
-from models import Base, engine
+from database import get_db, create_tables, check_database_connection, Base
 from schemas import ProductResponse, CategoryResponse
 from services import (
     get_products,
