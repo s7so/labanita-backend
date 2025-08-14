@@ -24,6 +24,7 @@ from cart.routes import router as cart_router
 from promotions.routes import router as promotion_router
 from orders.routes import router as order_router
 from store.routes import router as store_router
+from admin.routes import router as admin_router
 
 # =============================================================================
 # LIFESPAN EVENTS
@@ -126,6 +127,9 @@ app.include_router(order_router, prefix="/api")
 # Store management routes
 app.include_router(store_router, prefix="/api")
 
+# Admin management routes
+app.include_router(admin_router, prefix="/api")
+
 # =============================================================================
 # ROOT ENDPOINT
 # =============================================================================
@@ -153,6 +157,7 @@ async def root():
                 "Promotion Management (/api/promotions/*)",
                 "Order Management (/api/orders/*)",
                 "Store Management (/api/store/*)",
+                "Admin Management (/api/admin/*)",
                 "Payment Processing (/api/payments/*)",
                 "Inventory Management (/api/inventory/*)",
                 "Analytics & Reporting (/api/analytics/*)"
@@ -414,5 +419,6 @@ if __name__ == "__main__":
     print("🎉 Promotion management available at /api/promotions")
     print("📦 Order management available at /api/orders")
     print("🏪 Store management available at /api/store")
+    print("👨‍💼 Admin management available at /api/admin")
     print("👤 User management available at /api/user")
     print("🔐 Authentication available at /api/auth")
