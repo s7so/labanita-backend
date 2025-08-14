@@ -10,7 +10,7 @@ from core.exceptions import (
     ConflictException,
     InvalidCredentialsException
 )
-from auth.dependencies import get_current_active_user, get_current_verified_user
+from auth.dependencies import get_current_user, get_current_active_user, get_current_verified_user
 from models import User
 from user.schemas import (
     UserProfileUpdateRequest, PasswordChangeRequest, AccountDeletionRequest,
